@@ -1231,8 +1231,8 @@ async function start() {
         console.log('bootstrapped default admin', admin.email);
       }
     } catch {}
-    app.listen(port, () => {
-      console.log(`api listening on http://localhost:${port}`);
+    app.listen(port, '::', () => {
+      console.log(`api listening on http://[::]:${port}`);
     });
   } catch (err) {
     console.error('failed to start server', err);
@@ -1773,3 +1773,5 @@ app.get('/api/admin/suppliers', auth, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Failed to list suppliers (admin)' });
   }
 });
+
+start();
