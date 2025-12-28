@@ -30,10 +30,22 @@ fi
 APP_DIR="/var/www/amuldist"
 REPO_URL="https://github.com/navalkishoricomm/amuldist.git"
 
-# Fix for GitHub connection issues (IPv6/DNS)
-echo "Configuring Git to handle connection issues..."
-git config --global http.postBuffer 524288000
-git config --global http.sslVerify false
+# Fix for GitHub IPv6 issues
+# GitHub does not natively support IPv6 for cloning. 
+# We must use a proxy or fallback to a public IPv6-to-IPv4 gateway if this is an IPv6-only machine.
+
+echo "Configuring network for IPv6-only environment..."
+
+# Setup NAT64/DNS64 (Google's Public DNS64)
+# This allows IPv6-only machines to access IPv4 addresses (like GitHub's)
+if grep -q "nameserver" /etc/resolv.conf; then
+    echo "Backing up resolv.conf..."
+    sudo cp /etc/resolv.conf /etc/resolv.conf.bak
+fi
+
+# Use Google's DNS64 servers
+echo "nameserver 2001:4860:4860::6464" | sudo tee /etc/resolv.conf
+echo "nameserver 2001:4860:4860::64" | sudo tee -a /etc/resolv.conf
 
 if [ ! -d "$APP_DIR" ]; then
     echo "Cloning repository to $APP_DIR..."
@@ -42,14 +54,8 @@ if [ ! -d "$APP_DIR" ]; then
     
     # Try cloning
     if ! git clone $REPO_URL $APP_DIR; then
-        echo "Git clone failed. Trying to fix network settings..."
-        # Backup resolv.conf
-        sudo cp /etc/resolv.conf /etc/resolv.conf.bak
-        # Use Google DNS
-        echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
-        
-        echo "Retrying clone..."
-        git clone $REPO_URL $APP_DIR
+        echo "Git clone failed. Trying with verbose output..."
+        git clone --verbose $REPO_URL $APP_DIR
     fi
 else
     echo "Updating repository..."
