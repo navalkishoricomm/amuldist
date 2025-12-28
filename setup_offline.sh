@@ -27,6 +27,8 @@ cd $APP_DIR/server
 echo "Installing dependencies..."
 npm install
 
+cd $APP_DIR
+
 # 5. Configure Environment
 if [ ! -f .env ]; then
     echo "Creating .env file..."
@@ -40,7 +42,7 @@ fi
 
 # 6. Start Application
 echo "Starting application..."
-pm2 delete amul-dist-app 2>/dev/null || true
+pm2 delete amul-dist-server 2>/dev/null || true
 pm2 start ecosystem.config.js --env production
 pm2 save
 pm2 startup | tail -n 1 | bash || true
