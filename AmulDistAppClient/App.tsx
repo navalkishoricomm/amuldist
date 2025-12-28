@@ -41,11 +41,12 @@ type Rate = {
   price: number;
 };
 
-const BASE_URL = Platform.OS === 'web'
-  ? 'http://localhost:4000'
-  : Platform.OS === 'ios'
-    ? 'http://localhost:4000'
-    : 'http://10.0.2.2:4000';
+const BASE_URL = 'http://[2602:ff16:13:104e::1]:4000';
+// const BASE_URL = Platform.OS === 'web'
+//   ? 'http://localhost:4000'
+//   : Platform.OS === 'ios'
+//     ? 'http://localhost:4000'
+//     : 'http://10.0.2.2:4000';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
