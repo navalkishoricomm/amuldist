@@ -58,10 +58,12 @@ echo "Waiting for network settings to apply..."
 sleep 5
 
 echo "Testing connection to GitHub..."
+GIT_CONNECTION_OK=false
 if curl -I --connect-timeout 5 https://github.com >/dev/null 2>&1; then
     echo "Connection to GitHub verified."
+    GIT_CONNECTION_OK=true
 else
-    echo "WARNING: Connection check failed. Attempting to clone anyway..."
+    echo "WARNING: Connection check failed. Will skip git clone and use ZIP download."
 fi
 
 if [ ! -d "$APP_DIR" ]; then
@@ -69,11 +71,11 @@ if [ ! -d "$APP_DIR" ]; then
     sudo mkdir -p $APP_DIR
     sudo chown -R $USER:$USER /var/www
     
-    # Try cloning
-    if git clone $REPO_URL $APP_DIR; then
+    # Try cloning ONLY if connection verified
+    if [ "$GIT_CONNECTION_OK" = true ] && git clone $REPO_URL $APP_DIR; then
         echo "Git clone successful."
     else
-        echo "Git clone failed. Attempting to download via ZIP..."
+        echo "Git clone skipped or failed. Attempting to download via ZIP..."
         
         # Install unzip if missing
         if ! command -v unzip &> /dev/null; then
