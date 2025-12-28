@@ -30,11 +30,27 @@ fi
 APP_DIR="/var/www/amuldist"
 REPO_URL="https://github.com/navalkishoricomm/amuldist.git"
 
+# Fix for GitHub connection issues (IPv6/DNS)
+echo "Configuring Git to handle connection issues..."
+git config --global http.postBuffer 524288000
+git config --global http.sslVerify false
+
 if [ ! -d "$APP_DIR" ]; then
     echo "Cloning repository to $APP_DIR..."
     sudo mkdir -p $APP_DIR
     sudo chown -R $USER:$USER /var/www
-    git clone $REPO_URL $APP_DIR
+    
+    # Try cloning
+    if ! git clone $REPO_URL $APP_DIR; then
+        echo "Git clone failed. Trying to fix network settings..."
+        # Backup resolv.conf
+        sudo cp /etc/resolv.conf /etc/resolv.conf.bak
+        # Use Google DNS
+        echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+        
+        echo "Retrying clone..."
+        git clone $REPO_URL $APP_DIR
+    fi
 else
     echo "Updating repository..."
     cd $APP_DIR
