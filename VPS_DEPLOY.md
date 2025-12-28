@@ -12,24 +12,24 @@ Open your terminal (PowerShell or Command Prompt) and SSH into your server:
 ssh root@your_server_ip
 ```
 
-## Step 2: Run the Setup Script
-I have created a `setup.sh` script that automates everything (installs Node.js, Git, PM2, clones the repo, and starts the app).
+## Step 2: Run the Install Script
+I have created a `install.sh` script that automates everything (installs Node.js, Git, PM2, clones the repo, and starts the app).
 
 Run these commands on your server:
 
 1.  **Download the script:**
     ```bash
-    curl -O https://raw.githubusercontent.com/navalkishoricomm/amuldist/main/setup.sh
+    curl -O https://raw.githubusercontent.com/navalkishoricomm/amuldist/main/install.sh
     ```
 
 2.  **Make it executable:**
     ```bash
-    chmod +x setup.sh
+    chmod +x install.sh
     ```
 
 3.  **Run it:**
     ```bash
-    ./setup.sh
+    ./install.sh
     ```
 
 ## Step 3: Configure Database
