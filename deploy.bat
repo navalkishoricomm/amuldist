@@ -29,7 +29,7 @@ if %errorlevel% neq 0 (
 
 echo 3. Executing deployment on server...
 echo    (Please enter password: qD3eeHQaJd)
-ssh -o StrictHostKeyChecking=no root@2602:ff16:13:104e::1 "mkdir -p /var/www/amuldist && apt-get update && apt-get install -y unzip && unzip -o /tmp/deploy.zip -d /var/www/amuldist && cd /var/www/amuldist && bash setup_offline.sh"
+ssh -o StrictHostKeyChecking=no root@2602:ff16:13:104e::1 "mkdir -p /var/www/amuldist && apt-get update && apt-get install -y unzip && unzip -o /tmp/deploy.zip -d /var/www/amuldist && cd /var/www/amuldist && sed -i 's/\r$//' setup_offline.sh && bash setup_offline.sh"
 
 echo ==========================================
 echo           DEPLOYMENT FINISHED
