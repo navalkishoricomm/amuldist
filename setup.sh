@@ -61,8 +61,8 @@ else
     echo "Updating repository..."
     
     # Check if it is a valid git repo
-    if [ ! -d "$APP_DIR/.git" ]; then
-        echo "Directory exists but is not a git repository. Re-cloning..."
+    if ! git -C "$APP_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Directory exists but is not a valid git repository. Re-cloning..."
         sudo rm -rf $APP_DIR
         sudo mkdir -p $APP_DIR
         sudo chown -R $USER:$USER /var/www

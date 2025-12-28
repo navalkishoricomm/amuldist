@@ -13,7 +13,7 @@ module.exports = {
       },
       env_production: {
         NODE_ENV: 'production',
-        PORT: 80, // Running on port 80 requires sudo/authbind, otherwise use 4000 and nginx
+        PORT: 4000,
         MONGODB_URI: process.env.MONGODB_URI,
         JWT_SECRET: process.env.JWT_SECRET
       }
