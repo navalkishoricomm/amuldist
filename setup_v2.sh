@@ -85,9 +85,11 @@ if [ ! -d "$APP_DIR" ]; then
         
         # Download ZIP
         # Using codeload.github.com directly often bypasses some blocks, or just standard zip link
+        echo "Downloading ZIP from GitHub..."
         curl -L -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
         
         if [ -f amuldist.zip ]; then
+            echo "Unzipping repository..."
             unzip amuldist.zip
             # Move files from subdirectory (amuldist-main) to current directory
             # We are in /var/www/amuldist, unzip creates amuldist-main
