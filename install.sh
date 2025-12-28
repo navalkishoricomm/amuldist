@@ -34,18 +34,35 @@ REPO_URL="https://github.com/navalkishoricomm/amuldist.git"
 # GitHub does not natively support IPv6 for cloning. 
 # We must use a proxy or fallback to a public IPv6-to-IPv4 gateway if this is an IPv6-only machine.
 
-echo "Configuring network for IPv6-only environment..."
+echo "Configuring network (DNS64) for IPv6 access..."
 
-# Setup NAT64/DNS64 (Google's Public DNS64)
-# This allows IPv6-only machines to access IPv4 addresses (like GitHub's)
-if grep -q "nameserver" /etc/resolv.conf; then
-    echo "Backing up resolv.conf..."
-    sudo cp /etc/resolv.conf /etc/resolv.conf.bak
+# Stop systemd-resolved if it interferes
+if systemctl is-active --quiet systemd-resolved; then
+    echo "Disabling systemd-resolved to force DNS64..."
+    sudo systemctl stop systemd-resolved
+    sudo systemctl disable systemd-resolved
 fi
 
-# Use Google's DNS64 servers
+# Force update resolv.conf
+if [ -f /etc/resolv.conf ]; then
+    sudo cp /etc/resolv.conf /etc/resolv.conf.bak
+    sudo rm -f /etc/resolv.conf
+fi
+
+# Use Google's DNS64 servers (enables IPv6 -> IPv4 access)
 echo "nameserver 2001:4860:4860::6464" | sudo tee /etc/resolv.conf
 echo "nameserver 2001:4860:4860::64" | sudo tee -a /etc/resolv.conf
+echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf
+
+echo "Waiting for network settings to apply..."
+sleep 5
+
+echo "Testing connection to GitHub..."
+if curl -I --connect-timeout 5 https://github.com >/dev/null 2>&1; then
+    echo "Connection to GitHub verified."
+else
+    echo "WARNING: Connection check failed. Attempting to clone anyway..."
+fi
 
 if [ ! -d "$APP_DIR" ]; then
     echo "Cloning repository to $APP_DIR..."
