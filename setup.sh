@@ -59,8 +59,18 @@ if [ ! -d "$APP_DIR" ]; then
     fi
 else
     echo "Updating repository..."
-    cd $APP_DIR
-    git pull origin main
+    
+    # Check if it is a valid git repo
+    if [ ! -d "$APP_DIR/.git" ]; then
+        echo "Directory exists but is not a git repository. Re-cloning..."
+        sudo rm -rf $APP_DIR
+        sudo mkdir -p $APP_DIR
+        sudo chown -R $USER:$USER /var/www
+        git clone $REPO_URL $APP_DIR
+    else
+        cd $APP_DIR
+        git pull origin main
+    fi
 fi
 
 cd $APP_DIR/server
