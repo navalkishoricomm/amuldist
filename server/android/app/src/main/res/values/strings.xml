@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Amul Distributor</string>
+    <string name="title_activity_main">Amul Distributor</string>
+    <string name="package_name">com.amul.dist</string>
+    <string name="custom_url_scheme">com.amul.dist</string>
+</resources>
