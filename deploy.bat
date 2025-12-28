@@ -13,7 +13,19 @@ if %errorlevel% neq 0 (
 
 echo 2. Uploading package to server...
 echo    (Please enter password: qD3eeHQaJd)
-scp -o StrictHostKeyChecking=no deploy.zip root@2602:ff16:13:104e::1:/tmp/deploy.zip
+echo    NOTE: Uploading to IPv6 address...
+scp -o StrictHostKeyChecking=no deploy.zip root@[2602:ff16:13:104e::1]:/tmp/deploy.zip
+
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Upload failed! 
+    echo Possible reasons:
+    echo  - Wrong password.
+    echo  - Network connection issue.
+    echo.
+    pause
+    exit /b
+)
 
 echo 3. Executing deployment on server...
 echo    (Please enter password: qD3eeHQaJd)

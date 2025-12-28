@@ -32,10 +32,10 @@ if [ ! -f .env ]; then
     echo "Creating .env file..."
     cat > .env << EOL
 PORT=4000
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/amul_dist_app
-JWT_SECRET=change_this_secret_in_prod
+MONGODB_URI=mongodb+srv://navalkishoricomm:Naval123@cluster0.p7q8s.mongodb.net/amul_dist_app?retryWrites=true&w=majority&appName=Cluster0
+JWT_SECRET=amul_dist_secret_key_2024
 EOL
-    echo "⚠️  PLEASE EDIT .env FILE WITH YOUR REAL CREDENTIALS!"
+    echo ".env file created with default production settings."
 fi
 
 # 6. Start Application
