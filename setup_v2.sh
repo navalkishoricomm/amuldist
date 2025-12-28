@@ -28,7 +28,6 @@ fi
 
 # 4. Setup Directory
 APP_DIR="/var/www/amuldist"
-# REPO_URL="https://github.com/navalkishoricomm/amuldist.git" 
 
 echo "Configuring network (DNS64) for IPv6 access..."
 # ... (Keep network config)
@@ -38,8 +37,8 @@ if [ ! -d "$APP_DIR" ]; then
     sudo mkdir -p $APP_DIR
     sudo chown -R $USER:$USER /var/www
     
-    # ALWAYS use ZIP download to avoid Git network issues
-    echo "Downloading ZIP from GitHub (skipping Git clone due to network restrictions)..."
+    # Use codeload.github.com which is often more accessible and CDN-backed
+    echo "Downloading ZIP from GitHub (codeload)..."
     
     # Install unzip if missing
     if ! command -v unzip &> /dev/null; then
@@ -47,7 +46,14 @@ if [ ! -d "$APP_DIR" ]; then
         sudo apt-get install -y unzip
     fi
 
-    curl -L -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
+    # -L follows redirects, -k allows insecure (if certs are an issue), --ipv4 forces IPv4 if possible (via DNS64)
+    if curl -L -k -o amuldist.zip "https://codeload.github.com/navalkishoricomm/amuldist/zip/refs/heads/main"; then
+        echo "Download successful."
+    else
+        echo "Download failed. Trying alternative mirror or method..."
+        # Fallback to standard URL
+        curl -L -k -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
+    fi
     
     if [ -f amuldist.zip ]; then
         echo "Unzipping repository..."
@@ -62,8 +68,6 @@ if [ ! -d "$APP_DIR" ]; then
     fi
 else
     echo "Updating repository..."
-    # If directory exists, we can't easily "git pull" if we didn't clone.
-    # So we will re-download ZIP and overwrite.
     echo "Directory exists. Re-downloading via ZIP to ensure latest code..."
     
     # Install unzip if missing
@@ -71,7 +75,11 @@ else
         sudo apt-get install -y unzip
     fi
     
-    curl -L -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
+    if curl -L -k -o amuldist.zip "https://codeload.github.com/navalkishoricomm/amuldist/zip/refs/heads/main"; then
+         echo "Download successful."
+    else
+         curl -L -k -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
+    fi
     
     if [ -f amuldist.zip ]; then
         unzip -o amuldist.zip
