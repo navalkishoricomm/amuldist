@@ -96,10 +96,15 @@ if [ ! -d "$APP_DIR" ]; then
             rm -rf amuldist-main amuldist.zip
             
             # Initialize git manually so we can pull later (optional, but good)
-            git init
-            git remote add origin $REPO_URL
-            git fetch
-            git reset --hard origin/main
+            if command -v git &> /dev/null; then
+                echo "Initializing Git for future updates..."
+                git init
+                git remote add origin $REPO_URL
+                git fetch
+                git reset --hard origin/main
+            else
+                echo "Git not found. Skipping Git initialization."
+            fi
         else
             echo "FATAL: Could not download repository ZIP. Please check internet connection."
             exit 1
