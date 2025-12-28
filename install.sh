@@ -70,9 +70,38 @@ if [ ! -d "$APP_DIR" ]; then
     sudo chown -R $USER:$USER /var/www
     
     # Try cloning
-    if ! git clone $REPO_URL $APP_DIR; then
-        echo "Git clone failed. Trying with verbose output..."
-        git clone --verbose $REPO_URL $APP_DIR
+    if git clone $REPO_URL $APP_DIR; then
+        echo "Git clone successful."
+    else
+        echo "Git clone failed. Attempting to download via ZIP..."
+        
+        # Install unzip if missing
+        if ! command -v unzip &> /dev/null; then
+            echo "Installing unzip..."
+            sudo apt-get install -y unzip
+        fi
+        
+        # Download ZIP
+        # Using codeload.github.com directly often bypasses some blocks, or just standard zip link
+        curl -L -o amuldist.zip "https://github.com/navalkishoricomm/amuldist/archive/refs/heads/main.zip"
+        
+        if [ -f amuldist.zip ]; then
+            unzip amuldist.zip
+            # Move files from subdirectory (amuldist-main) to current directory
+            # We are in /var/www/amuldist, unzip creates amuldist-main
+            cp -r amuldist-main/* .
+            cp -r amuldist-main/.* . 2>/dev/null || true
+            rm -rf amuldist-main amuldist.zip
+            
+            # Initialize git manually so we can pull later (optional, but good)
+            git init
+            git remote add origin $REPO_URL
+            git fetch
+            git reset --hard origin/main
+        else
+            echo "FATAL: Could not download repository ZIP. Please check internet connection."
+            exit 1
+        fi
     fi
 else
     echo "Updating repository..."
