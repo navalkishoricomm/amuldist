@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
   res.redirect('/ui/');
 });
 
-const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/amul_dist_app';
+const mongoUri = 'mongodb://127.0.0.1:27017/amul_dist_app';
 const port = process.env.PORT || 4000;
 
 const userSchema = new mongoose.Schema(
@@ -210,7 +210,7 @@ const transactionSchema = new mongoose.Schema(
     createdByStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     type: { type: String, enum: ['order', 'payment_cash', 'payment_online'], required: true },
     amount: { type: Number, required: true },
-    referenceId: { type: mongoose.Schema.Types.ObjectId },
+    referenceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' },
     note: { type: String },
   },
   { timestamps: true }
@@ -238,13 +238,20 @@ async function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
     const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ error: 'unauthorized' });
+    if (!token) {
+        console.log('Auth failed: No token provided');
+        return res.status(401).json({ error: 'unauthorized' });
+    }
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
     const user = await User.findById(payload.sub);
-    if (!user) return res.status(401).json({ error: 'unauthorized' });
+    if (!user) {
+        console.log('Auth failed: User not found for sub', payload.sub);
+        return res.status(401).json({ error: 'unauthorized' });
+    }
     req.user = user;
     next();
   } catch (e) {
+    console.log('Auth failed: Exception', e.message);
     return res.status(401).json({ error: 'unauthorized' });
   }
 }
@@ -484,6 +491,43 @@ app.post('/api/dev/bulk-retailers', requireDevSecret, async (req, res) => {
   }
 });
 
+app.patch('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role, active, phone, address, password, distributorId } = req.body;
+    
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (name) user.name = name;
+    if (email) user.email = email;
+    if (role) {
+       if (!['admin', 'distributor', 'retailer', 'staff'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+       user.role = role;
+    }
+    if (typeof active === 'boolean') user.active = active;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
+    if (password) user.passwordHash = await bcrypt.hash(String(password), 10);
+    
+    if (distributorId !== undefined) {
+        if (!distributorId) {
+            user.distributorId = undefined;
+        } else {
+             const d = await User.findOne({ _id: distributorId, role: 'distributor' });
+             if (!d) return res.status(400).json({ error: 'Invalid distributor ID' });
+             user.distributorId = distributorId;
+        }
+    }
+
+    await user.save();
+    res.json({ _id: user._id, name: user.name, email: user.email, role: user.role, active: user.active, phone: user.phone, address: user.address, distributorId: user.distributorId });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'Email already exists' });
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
 app.patch('/api/users/:id/status', auth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -660,6 +704,41 @@ app.get('/api/admin/retailer-mapping', auth, requireAdmin, async (_req, res) => 
     res.json(map);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load retailer mapping' });
+  }
+});
+
+// Update user details (admin) - including distributor mapping
+app.patch('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role, phone, address, active, password, distributorId } = req.body;
+    
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (name) user.name = name;
+    if (email) user.email = email;
+    if (role) user.role = role;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
+    if (active !== undefined) user.active = active;
+    if (password) user.passwordHash = await bcrypt.hash(String(password), 10);
+    
+    if (distributorId !== undefined) {
+      if (distributorId === '' || distributorId === null) {
+        user.distributorId = undefined;
+      } else {
+        const dist = await User.findOne({ _id: distributorId, role: 'distributor' });
+        if (!dist) return res.status(400).json({ error: 'Invalid distributor ID' });
+        user.distributorId = dist._id;
+      }
+    }
+
+    await user.save();
+    res.json({ ok: true, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'Email already exists' });
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 
@@ -908,6 +987,81 @@ app.post('/api/admin/distributors/:id/rates', auth, requireAdmin, async (req, re
   }
 });
 
+// Export all retailer-specific rates (Excel-compatible CSV)
+app.get('/api/admin/export/retailer-rates.csv', auth, requireAdmin, async (req, res) => {
+  try {
+    const { distributorId } = req.query;
+    const filter = {};
+    if (distributorId) {
+      try { filter.distributorId = new mongoose.Types.ObjectId(String(distributorId)); }
+      catch { return res.status(400).send('invalid distributorId'); }
+    }
+    const items = await RetailerRate.find(filter)
+      .sort({ updatedAt: -1 })
+      .populate('productId', 'nameEnglish')
+      .populate('distributorId', 'name email')
+      .populate('retailerId', 'name email')
+      .lean();
+    const header = ['distributor_name','distributor_id','retailer_name','retailer_id','product_name','product_id','price','updated_at'];
+    const lines = items.map(i => {
+      const d = i.distributorId || {};
+      const r = i.retailerId || {};
+      const p = i.productId || {};
+      const row = [d.name||'', String(d._id||''), r.name||'', String(r._id||''), p.nameEnglish||'', String(p._id||''), Number(i.price)||0, new Date(i.updatedAt||i.createdAt).toISOString()];
+      return row.map(v => typeof v === 'string' ? '"' + String(v).replace(/"/g, '""') + '"' : String(v)).join(',');
+    });
+    const csv = header.join(',') + '\n' + lines.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="retailer-rates.csv"');
+    return res.send(csv);
+  } catch (err) {
+    return res.status(500).send('failed to export retailer rates');
+  }
+});
+
+// Export current distributor's retailer rates (Excel-compatible CSV)
+app.get('/api/my/export/retailer-rates.csv', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    const items = await RetailerRate.find({ distributorId })
+      .sort({ updatedAt: -1 })
+      .populate('productId', 'nameEnglish')
+      .populate('retailerId', 'name email')
+      .lean();
+    const header = ['retailer_name','retailer_id','product_name','product_id','price','updated_at'];
+    const lines = items.map(i => {
+      const r = i.retailerId || {};
+      const p = i.productId || {};
+      const row = [r.name||'', String(r._id||''), p.nameEnglish||'', String(p._id||''), Number(i.price)||0, new Date(i.updatedAt||i.createdAt).toISOString()];
+      return row.map(v => typeof v === 'string' ? '"' + String(v).replace(/"/g, '""') + '"' : String(v)).join(',');
+    });
+    const csv = header.join(',') + '\n' + lines.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="my-retailer-rates.csv"');
+    return res.send(csv);
+  } catch (err) {
+    return res.status(500).send('failed to export retailer rates');
+  }
+});
+
+
+app.get('/api/my/stats', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    
+    const startOfToday = new Date();
+    startOfToday.setHours(0,0,0,0);
+
+    const inventoryCount = await Inventory.countDocuments({ distributorId });
+    const lowStockCount = await Inventory.countDocuments({ distributorId, quantity: { $lte: 10 } });
+    const retailerCount = await User.countDocuments({ role: 'retailer', distributorId });
+    const todayOrders = await Order.countDocuments({ distributorId, createdAt: { $gte: startOfToday } });
+    
+    res.json({ inventoryCount, lowStockCount, retailerCount, todayOrders });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
 
 app.get('/api/my/products', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
@@ -1142,6 +1296,13 @@ app.post('/api/retailer/orders', auth, requireRetailer, async (req, res) => {
         return res.status(400).json({ error: `Insufficient stock for product ${pid}` });
       }
       
+      let pObj = await Product.findById(pid).populate('unit');
+      if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
+      
+      const u = pObj ? pObj.unit : null;
+      const isCompound = u && String(u.type) === 'Compound';
+      const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
+      
       let price = 0;
       const rr = await RetailerRate.findOne({ distributorId: distId, retailerId: req.user._id, productId: pid });
       if (rr) price = rr.price;
@@ -1155,7 +1316,12 @@ app.post('/api/retailer/orders', auth, requireRetailer, async (req, res) => {
       }
       
       orderItems.push({ productId: pid, quantity: qty, price });
-      total += price * qty;
+      
+      if(isCompound && conv > 0){
+         total += (price / conv) * qty;
+      } else {
+         total += price * qty;
+      }
     }
     
     if (orderItems.length === 0) return res.status(400).json({ error: 'no valid items' });
@@ -1290,6 +1456,9 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     
     if (productId) filter.productId = productId;
     if (retailerId) filter.retailerId = retailerId;
+    const { supplierId } = req.query;
+    if (supplierId) filter.supplierId = supplierId;
+
     if (type && ['IN', 'OUT'].includes(String(type))) filter.type = type;
     if (from || to) {
       filter.createdAt = {};
@@ -1311,6 +1480,8 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     }
     const items = await StockMove.find(filter)
       .populate('createdByStaffId', 'name')
+      .populate('supplierId', 'name')
+      .populate('retailerId', 'name')
       .populate({
         path: 'productId',
         select: 'nameEnglish nameHindi unit',
@@ -1324,6 +1495,64 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list stock moves' });
+  }
+});
+
+app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { quantity, note } = req.body;
+    const { distributorId } = getContext(req);
+
+    const move = await StockMove.findById(id);
+    if (!move) return res.status(404).json({ error: 'Move not found' });
+    if (String(move.distributorId) !== String(distributorId)) return res.status(403).json({ error: 'Access denied' });
+
+    if (req.user.role === 'staff') {
+       const p = req.user.permissions || [];
+       if (move.type === 'IN' && !p.includes('stock_in')) return res.status(403).json({ error: 'Permission denied' });
+       if (move.type === 'OUT' && !p.includes('stock_out')) return res.status(403).json({ error: 'Permission denied' });
+    }
+
+    const newQty = Number(quantity);
+    if (isNaN(newQty) || newQty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+
+    const oldQty = move.quantity;
+    const diff = newQty - oldQty;
+
+    if (diff !== 0) {
+      const inv = await Inventory.findOne({ distributorId, productId: move.productId });
+      
+      let change = 0;
+      if (move.type === 'IN') {
+          change = diff; 
+      } else {
+          change = -diff; 
+      }
+      
+      if (!inv) {
+         if (move.type === 'IN') {
+            await Inventory.create({ distributorId, productId: move.productId, quantity: diff });
+         } else {
+             return res.status(400).json({ error: 'Inventory record missing' });
+         }
+      } else {
+          if (inv.quantity + change < 0) {
+              return res.status(400).json({ error: 'Insufficient inventory' });
+          }
+          inv.quantity += change;
+          await inv.save();
+      }
+    }
+
+    move.quantity = newQty;
+    if (note !== undefined) move.note = note;
+    await move.save();
+
+    res.json(move);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update stock move' });
   }
 });
 
@@ -1409,6 +1638,58 @@ app.get('/api/my/supplier-transactions', auth, requireDistributorOrStaff(null), 
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list supplier transactions' });
+  }
+});
+
+app.get('/api/retailer/transactions', auth, requireRetailer, async (req, res) => {
+  try {
+    const { type, from, to } = req.query;
+    const filter = { retailerId: req.user._id };
+    
+    if (type) filter.type = type;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) {
+        const d = new Date(String(from));
+        if (!isNaN(d.getTime())) {
+            if (String(from).length === 10) d.setMinutes(d.getMinutes() - 330);
+            filter.createdAt.$gte = d;
+        }
+      }
+      if (to) {
+        const d = new Date(String(to));
+        if (!isNaN(d.getTime())) {
+          if (String(to).length === 10) d.setUTCHours(23, 59, 59, 999);
+          filter.createdAt.$lte = d;
+        }
+      }
+    }
+
+    const items = await Transaction.find(filter)
+      .populate('distributorId', 'name')
+      .populate({
+        path: 'referenceId',
+        populate: {
+          path: 'items.productId',
+          select: 'nameEnglish nameHindi unit',
+          populate: { path: 'unit', populate: { path: 'firstUnit secondUnit' } }
+        }
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+      
+    const results = items.map(t => {
+      if (t.type === 'order' && t.referenceId && t.referenceId.items) {
+        t.items = t.referenceId.items;
+        // clear referenceId to avoid circular/large payload if not needed, but keeping it is fine.
+        // t.referenceId = t.referenceId._id; // optional
+      }
+      return t;
+    });
+    
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list transactions' });
   }
 });
 
@@ -1670,25 +1951,6 @@ app.post('/api/my/rates', auth, requireDistributor, async (req, res) => {
   }
 });
 
-app.all('/', (_req, res) => { res.redirect('/ui/index.html'); });
-app.all('/admin.html', (_req, res) => { res.redirect('/ui/admin.html'); });
-app.all('/distributor.html', (_req, res) => { res.redirect('/ui/distributor.html'); });
-// Final 404 handler must be LAST
-app.use((req, res) => {
-  try {
-    const path = String(req.path || '');
-    const accept = String(req.headers['accept'] || '');
-    if (req.method === 'GET' && !path.startsWith('/api')) {
-      return res.redirect('/ui/index.html');
-    }
-    const wantsHtml = accept.includes('text/html') || path.endsWith('.html');
-    if (wantsHtml && req.method === 'GET') {
-      return res.redirect('/ui/index.html');
-    }
-  } catch {}
-  res.status(404).json({ error: 'not found' });
-});
-start();
 // Admin reports: stock moves
 app.get('/api/admin/stock-moves', auth, requireAdmin, async (req, res) => {
   try {
@@ -1774,4 +2036,22 @@ app.get('/api/admin/suppliers', auth, requireAdmin, async (req, res) => {
   }
 });
 
+app.all('/', (_req, res) => { res.redirect('/ui/index.html'); });
+app.all('/admin.html', (_req, res) => { res.redirect('/ui/admin.html'); });
+app.all('/distributor.html', (_req, res) => { res.redirect('/ui/distributor.html'); });
+// Final 404 handler must be LAST
+app.use((req, res) => {
+  try {
+    const path = String(req.path || '');
+    const accept = String(req.headers['accept'] || '');
+    if (req.method === 'GET' && !path.startsWith('/api')) {
+      return res.redirect('/ui/index.html');
+    }
+    const wantsHtml = accept.includes('text/html') || path.endsWith('.html');
+    if (wantsHtml && req.method === 'GET') {
+      return res.redirect('/ui/index.html');
+    }
+  } catch {}
+  res.status(404).json({ error: 'not found' });
+});
 start();

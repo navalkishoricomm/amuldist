@@ -11,6 +11,7 @@ function setToken(t, r){
   localStorage.setItem('TOKEN', t); 
   if(r) { ROLE = r; localStorage.setItem('ROLE', r); }
 }
+function uiHref(page){ const isFile = location.protocol === 'file:'; return isFile ? `${page}.html` : `/ui/${page}.html`; }
 async function api(path, opts={}){
   const headers = Object.assign({ 'Content-Type':'application/json' }, opts.headers||{});
   if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
@@ -24,7 +25,7 @@ async function api(path, opts={}){
     throw err;
   }
   const ct = res.headers.get('content-type')||''; const text = await res.text(); let data=null; if (ct.includes('application/json')){ try{ data=JSON.parse(text);}catch{} }
-  if(res.status===401 || res.status===403) { setToken('', ''); location.href='/ui/index.html'; }
+  if(res.status===401 || res.status===403) { setToken('', ''); location.href = uiHref('index'); }
   if(!res.ok) throw new Error((data&&data.error)||`HTTP ${res.status}`);
   return data;
 }
@@ -32,20 +33,61 @@ function qs(sel){ return document.querySelector(sel); }
 function qsa(sel){ return Array.from(document.querySelectorAll(sel)); }
 function show(el){ el.classList.remove('d-none'); }
 function hide(el){ el.classList.add('d-none'); }
-async function logout(){ try{ if(TOKEN){ await api('/api/auth/logout',{ method:'POST' }); } }catch{} setToken('', ''); location.href='/ui/index.html'; }
+
+let globalStockMoves = {};
+let globalUnitMap = {};
+
+function formatUnitQty(qty, unitObj, unitMap){
+  if(qty === undefined || qty === null || isNaN(qty)) return '0';
+  qty = Number(qty);
+  if(!unitObj) return qty;
+  
+  let u = unitObj;
+  if(typeof u === 'string'){
+     if(unitMap && unitMap[u]) u = unitMap[u];
+     else return qty; 
+  }
+  
+  if(String(u.type) === 'Compound'){
+    const conv = Number(u.conversionFactor);
+    if(!conv) return `${qty} ${u.symbol}`;
+    
+    const major = Math.floor(qty / conv);
+    const minor = qty % conv;
+    
+    let f = u.firstUnit;
+    let s = u.secondUnit;
+    
+    if(typeof f === 'string' && unitMap) f = unitMap[f];
+    if(typeof s === 'string' && unitMap) s = unitMap[s];
+    
+    const fSym = (f && f.symbol) ? f.symbol : (u.symbol || '?');
+    const sSym = (s && s.symbol) ? s.symbol : '';
+    
+    let parts = [];
+    if(major !== 0) parts.push(`${major} ${fSym}`);
+    if(minor !== 0) parts.push(`${minor} ${sSym}`);
+    if(parts.length === 0) return `0 ${sSym}`;
+    return parts.join(' ');
+  } else {
+    return `${qty} ${u.symbol}`;
+  }
+}
+
+async function logout(){ try{ if(TOKEN){ await api('/api/auth/logout',{ method:'POST' }); } }catch{} setToken('', ''); location.href = uiHref('index'); }
 function bindLogout(){ const btn=qs('#logoutBtn'); if(btn){ btn.addEventListener('click', (e)=>{ e.preventDefault(); logout(); }); } }
 
 function checkAuth(){
   const path = location.pathname;
-  if(path.endsWith('index.html') || path==='/'){
+  if(path.endsWith('index.html') || path=== '/'){
     if(TOKEN) {
-      if(ROLE==='admin') location.href='/ui/admin.html';
-      else if(ROLE==='distributor' || ROLE==='staff') location.href='/ui/distributor.html';
-      else if(ROLE==='retailer') location.href='/ui/retailer.html';
-      else { setToken('', ''); location.href='/ui/index.html'; } // Unknown or missing role
+      if(ROLE==='admin') location.href = uiHref('admin');
+      else if(ROLE==='distributor' || ROLE==='staff') location.href = uiHref('distributor');
+      else if(ROLE==='retailer') location.href = uiHref('retailer');
+      else { setToken('', ''); location.href = uiHref('index'); }
     }
   } else {
-    if(!TOKEN) location.href = '/ui/index.html';
+    if(!TOKEN) location.href = uiHref('index');
   }
 }
 
@@ -56,16 +98,16 @@ async function login(){
   try{
     const res = await api('/api/auth/login', { method:'POST', body: JSON.stringify({ email, password }) });
     setToken(res.token, res.user.role);
-    if(res.user.role==='admin') location.href='/ui/admin.html';
-    else if(res.user.role==='distributor' || res.user.role==='staff') location.href='/ui/distributor.html';
-    else if(res.user.role==='retailer') location.href='/ui/retailer.html';
+    if(res.user.role==='admin') location.href = uiHref('admin');
+    else if(res.user.role==='distributor' || res.user.role==='staff') location.href = uiHref('distributor');
+    else if(res.user.role==='retailer') location.href = uiHref('retailer');
     else alert('Unknown role');
   }catch(e){ alert(e.message); }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initApp() {
   const p = location.pathname;
-  if (p.endsWith('index.html') || p === '/') {
+  if (p.endsWith('index.html') || p === '/' || p.endsWith('/ui/')) {
     try { checkAuth(); } catch {}
     const form = document.getElementById('loginForm');
     if (form) {
@@ -80,7 +122,22 @@ document.addEventListener('DOMContentLoaded', () => {
       curUrl.textContent = BASE_URL || '(Relative/Default)';
     }
   }
-});
+  
+  // Use path check with element fallback to ensure correct loader runs
+  if (p.includes('admin.html') || document.getElementById('usersList')) {
+    loadAdmin();
+  } else if (p.includes('distributor.html') || document.getElementById('nav-dashboard')) {
+    loadDistributor();
+  } else if (p.includes('retailer.html') || document.getElementById('tab-order')) {
+    loadRetailer();
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 function saveServerUrl() {
   const inp = document.getElementById('serverUrl');
@@ -93,7 +150,7 @@ function saveServerUrl() {
   }
 }
 
-async function checkRoleAndRedirect(expected){ try{ const me=await api('/api/me'); const role=me&&me.role; if(expected==='admin' && role!=='admin'){ location.href='/ui/index.html'; return; } if(expected==='distributor' && role!=='distributor'){ location.href='/ui/index.html'; return; } if(expected==='retailer' && role!=='retailer'){ location.href='/ui/index.html'; return; } return me; }catch{ location.href='/ui/index.html'; } }
+async function checkRoleAndRedirect(expected){ try{ const me=await api('/api/me'); const role=me&&me.role; if(expected==='admin' && role!=='admin'){ location.href = uiHref('index'); return; } if(expected==='distributor' && role!=='distributor' && role!=='staff'){ location.href = uiHref('index'); return; } if(expected==='retailer' && role!=='retailer'){ location.href = uiHref('index'); return; } return me; }catch{ location.href = uiHref('index'); } }
 
 async function loadAdmin(){
   await checkRoleAndRedirect('admin');
@@ -103,6 +160,7 @@ async function loadAdmin(){
   renderProductsGrid('#productsGrid');
   bindProductForm();
   renderUsersList('#usersList');
+  bindUserEditModal();
   renderRatesList('#ratesList');
   bindGlobalRateForm();
   
@@ -128,49 +186,217 @@ async function deleteUnit(id){ if(!confirm('Delete unit?')) return; try{ await a
 function bindUnitForm(){ const btn=qs('#unitSave'); if(btn){ btn.onclick=async ()=>{ const type=qs('#unitType').value; const symbol=qs('#unitSymbol').value; const formalName=qs('#unitFormal').value; const decimalPlaces=qs('#unitDecimal').value; const firstUnit=qs('#unitFirst').value; const secondUnit=qs('#unitSecond').value; const conversionFactor=qs('#unitConv').value; try{ await api('/api/units',{ method:'POST', body: JSON.stringify({ type, symbol, formalName, decimalPlaces, firstUnit, secondUnit, conversionFactor }) }); qs('#unitSymbol').value=''; renderUnitsGrid('#unitsGrid'); }catch(e){ alert(e.message); } }; } const sel=qs('#unitType'); if(sel){ sel.onchange=()=>{ const isC=sel.value==='Compound'; const els=qsa('.compound-only'); els.forEach(el=>isC?show(el):hide(el)); if(isC) loadUnitSelects(); }; } }
 async function loadUnitSelects(){ const units=await api('/api/units'); const simple=units.filter(u=>u.type==='Simple'); const opts='<option value="">Select Unit</option>'+simple.map(u=>`<option value="${u._id}">${u.symbol}</option>`).join(''); qs('#unitFirst').innerHTML=opts; qs('#unitSecond').innerHTML=opts; }
 
-async function renderProductsGrid(selector){ const el = qs(selector); if(!el) return; const units = await api('/api/units'); const byId = {}; units.forEach(x=>{ byId[x._id]=x; }); const products = await api('/api/products'); el.innerHTML=''; products.forEach(p=>{ const card = document.createElement('div'); card.className = 'card p-3 mb-2'; const u = p.unit ? byId[p.unit] : null; const uStr = u ? (u.symbol) : '-'; card.innerHTML = `<div class="d-flex justify-content-between align-items-center"><div><div class="fw-bold">${p.nameEnglish}</div><div class="small text-muted">${p.nameHindi || ''}</div><div class="small">Unit: ${uStr}</div></div><div><button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${p._id}')"><i class="bi bi-trash"></i></button></div></div>`; el.appendChild(card); }); }
+async function renderProductsGrid(selector){ 
+  const el = qs(selector); 
+  if(!el) return; 
+  const units = await api('/api/units'); 
+  const products = await api('/api/products'); 
+  const unitOpts = '<option value="">-</option>' + units.map(u => `<option value="${u._id}">${u.symbol}</option>`).join('');
+  
+  el.innerHTML=''; 
+  products.forEach(p=>{ 
+    const card = document.createElement('div'); 
+    card.className = 'card p-3 mb-2'; 
+    card.innerHTML = `
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">${p.nameEnglish}</div>
+          <div class="small text-muted">${p.nameHindi || ''}</div>
+          <div class="input-group input-group-sm mt-1" style="max-width:200px">
+             <span class="input-group-text">Unit</span>
+             <select class="form-select" id="p-unit-${p._id}">${unitOpts}</select>
+             <button class="btn btn-outline-primary" onclick="updateProductUnit('${p._id}')"><i class="bi bi-check"></i></button>
+          </div>
+        </div>
+        <div>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${p._id}')"><i class="bi bi-trash"></i></button>
+        </div>
+      </div>`; 
+    el.appendChild(card);
+    const sel = card.querySelector(`#p-unit-${p._id}`);
+    if(sel && p.unit) sel.value = typeof p.unit === 'object' ? p.unit._id : p.unit;
+  }); 
+}
+
+async function updateProductUnit(id){
+  const sel = qs(`#p-unit-${id}`);
+  const unit = sel ? sel.value : '';
+  try {
+    await api(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify({ unit }) });
+    alert('Unit updated');
+  } catch(e) { alert(e.message); }
+}
+
 function bindProductForm(){ const btn=qs('#prodSave'); if(btn){ btn.onclick=async ()=>{ const nameEnglish=qs('#prodName').value; try{ await api('/api/products',{ method:'POST', body: JSON.stringify({ nameEnglish }) }); qs('#prodName').value=''; renderProductsGrid('#productsGrid'); }catch(e){ alert(e.message); } }; } }
 async function deleteProduct(id){ if(!confirm('Delete product?')) return; try{ await api(`/api/products/${id}`,{ method:'DELETE' }); renderProductsGrid('#productsGrid'); }catch(e){ alert(e.message); } }
 
-async function renderUsersList(selector){ const el=qs(selector); if(!el) return; const users=await api('/api/users'); el.innerHTML=''; users.forEach(u=>{ const card=document.createElement('div'); card.className='card p-3'; card.innerHTML=`<div class="fw-bold">${u.name}</div><div class="text-muted">${u.email}</div><div class="badge bg-secondary">${u.role}</div>`; el.appendChild(card); }); }
+async function renderUsersList(selector){ 
+  const el=qs(selector); 
+  if(!el) return; 
+  const users=await api('/api/users'); 
+  el.innerHTML=''; 
+  users.forEach(u=>{ 
+    const card=document.createElement('div'); 
+    card.className='card p-3 mb-2'; 
+    card.innerHTML=`
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+           <div class="fw-bold">${u.name} <span class="badge bg-secondary">${u.role}</span></div>
+           <div class="text-muted small">${u.email}</div>
+           <div class="text-muted small">${u.phone||''}</div>
+        </div>
+        <div>
+           <button class="btn btn-sm btn-outline-primary" onclick='openUserEditModal(${JSON.stringify(u)})'><i class="bi bi-pencil"></i> Edit</button>
+        </div>
+      </div>`; 
+    el.appendChild(card); 
+  }); 
+}
+
+function openUserEditModal(u){
+  qs('#editUserId').value = u._id;
+  qs('#editUserName').value = u.name;
+  qs('#editUserEmail').value = u.email;
+  const roleSel = qs('#editUserRole');
+  roleSel.value = u.role;
+  qs('#editUserPhone').value = u.phone || '';
+  qs('#editUserAddress').value = u.address || '';
+  qs('#editUserActive').checked = u.active;
+  qs('#editUserPassword').value = '';
+  
+  // Load distributors and handle role change
+  const distDiv = qs('#editUserDistributorDiv');
+  const distSel = qs('#editUserDistributor');
+  
+  const toggleDist = () => {
+    if(roleSel.value === 'retailer') show(distDiv);
+    else hide(distDiv);
+  };
+  roleSel.onchange = toggleDist;
+  
+  // Fetch distributors
+  api('/api/users?role=distributor').then(dists => {
+    distSel.innerHTML = '<option value="">-- Select Distributor --</option>';
+    dists.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d._id;
+      opt.textContent = d.name + (d.active ? '' : ' (Inactive)');
+      if(u.distributorId === d._id || (u.distributorId && u.distributorId._id === d._id)) opt.selected = true;
+      distSel.appendChild(opt);
+    });
+    toggleDist();
+  }).catch(console.error);
+
+  const m = new bootstrap.Modal(qs('#userEditModal'));
+  m.show();
+}
+
+function bindUserEditModal(){
+  const btn = qs('#btnSaveUser');
+  if(btn){
+    btn.onclick = async () => {
+       const id = qs('#editUserId').value;
+       const name = qs('#editUserName').value;
+       const email = qs('#editUserEmail').value;
+       const role = qs('#editUserRole').value;
+       const phone = qs('#editUserPhone').value;
+       const address = qs('#editUserAddress').value;
+       const active = qs('#editUserActive').checked;
+       const password = qs('#editUserPassword').value;
+       const distributorId = qs('#editUserDistributor').value;
+       
+       const body = { name, email, role, phone, address, active, distributorId };
+       if(password) body.password = password;
+       
+       try {
+         await api(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+         const el = qs('#userEditModal');
+         const m = bootstrap.Modal.getInstance(el);
+         if(m) m.hide();
+         renderUsersList('#usersList');
+       } catch(e) { alert(e.message); }
+    };
+  }
+}
 async function renderRatesList(selector){ const el=qs(selector); if(!el) return; const rates=await api('/api/admin/rates'); const products=await api('/api/products'); const pMap={}; products.forEach(p=>pMap[p._id]=p.nameEnglish); el.innerHTML=''; rates.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${pMap[r.productId]||r.productId}</td><td>₹${r.price}</td>`; el.appendChild(tr); }); }
 function bindGlobalRateForm(){ const btn=qs('#rateSave'); if(btn){ btn.onclick=async ()=>{ const productId=qs('#rateProduct').value; const price=qs('#ratePrice').value; try{ await api('/api/admin/rates',{ method:'POST', body: JSON.stringify({ productId, price }) }); renderRatesList('#ratesList'); }catch(e){ alert(e.message); } }; } loadRateProductSelect(); }
 async function loadRateProductSelect(){ const products=await api('/api/products'); const opts='<option value="">Select Product</option>'+products.map(p=>`<option value="${p._id}">${p.nameEnglish}</option>`).join(''); qs('#rateProduct').innerHTML=opts; }
 
+// Define switchTab globally so it's available even if loadDistributor pauses
+window.switchTab = (id) => {
+  qsa('.tab-pane').forEach(el => {
+     el.classList.remove('show','active');
+     if(el.id === id) el.classList.add('show','active');
+  });
+  qsa('.nav-link').forEach(el => el.classList.remove('active'));
+  const navBtn = qs(`button[data-bs-target="#${id}"]`);
+  if(navBtn) navBtn.classList.add('active');
+  
+  // Load content
+  if(id==='tab-dashboard') loadDistDashboard();
+  if(id==='tab-products') { renderDistProductsGrid('#distProdGrid'); renderHiddenProducts('#hiddenProdList'); bindDistProductAdd(); }
+  if(id==='tab-inventory') renderInventoryStatus();
+  if(id==='tab-stock-in') renderStockIn();
+  if(id==='tab-stock-out') renderStockOut();
+  if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); }
+  if(id==='tab-staff') { loadStaff(); bindStaffForm(); }
+  if(id==='tab-rates') { loadDistRates(); }
+  if(id==='tab-reports') { renderReport(); bindReportActions(); }
+};
+
 async function loadDistributor(){
+  // Tabs
+  const tabs = ['dashboard','products','inventory','stock-in','stock-out','rates','retailers','reports','staff'];
+  // window.switchTab is already defined above
+
+  tabs.forEach(t => {
+     const btn = qs(`#nav-${t}`);
+     if(btn) btn.onclick = () => window.switchTab(`tab-${t}`);
+     // Mobile quick actions
+     const qa = qs(`#qa-${t}`);
+     if(qa) qa.onclick = () => window.switchTab(`tab-${t}`);
+  });
+  
+  // Bind offcanvas listeners immediately
+  const ocEl = qs('#offcanvasNavbar');
+  if(ocEl){
+    ocEl.addEventListener('click', (ev)=>{
+      const t = ev.target;
+      if(!(t.closest('.nav-link') || t.closest('.btn') || t.closest('input') || t.closest('select') || t.closest('textarea'))){
+        try{ const inst = bootstrap.Offcanvas.getInstance(ocEl) || bootstrap.Offcanvas.getOrCreateInstance(ocEl); inst.hide(); }catch{}
+      }
+    });
+    document.addEventListener('click', (ev)=>{
+      const open = document.querySelector('.offcanvas.show');
+      if(!open) return;
+      if(ev.target.closest('.offcanvas')) return;
+      try{ const inst = bootstrap.Offcanvas.getInstance(open) || bootstrap.Offcanvas.getOrCreateInstance(open); inst.hide(); }catch{}
+    });
+  }
+
   const me = await checkRoleAndRedirect('distributor');
   bindLogout();
   
-  // Tabs
-  const tabs = ['dashboard','products','inventory','stock-in','stock-out','rates','retailers','reports','staff'];
-  const switchTab = (id) => {
-    qsa('.tab-pane').forEach(el => {
-       el.classList.remove('show','active');
-       if(el.id === id) el.classList.add('show','active');
-    });
-    qsa('.nav-link').forEach(el => el.classList.remove('active'));
-    const navBtn = qs(`button[data-bs-target="#${id}"]`);
-    if(navBtn) navBtn.classList.add('active');
+  if(me.role === 'staff'){
+    const p = me.permissions || [];
+    window.PERM = p;
+    const hideIt = (id) => {
+       const el = qs('#qa-'+id); if(el) hide(el);
+       const nav = qs('#nav-'+id); if(nav) hide(nav.parentNode);
+    };
     
-    // Load content
-    if(id==='tab-dashboard') loadDistDashboard();
-    if(id==='tab-products') { renderDistProductsGrid('#distProdGrid'); renderHiddenProducts('#hiddenProdList'); bindDistProductAdd(); }
-    if(id==='tab-inventory') renderInventoryStatus();
-    if(id==='tab-stock-in') renderStockIn();
-    if(id==='tab-stock-out') renderStockOut();
-    if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); }
-    if(id==='tab-staff') { loadStaff(); bindStaffForm(); }
-    if(id==='tab-rates') { loadDistRates(); }
-    if(id==='tab-reports') { renderReport(); bindReportActions(); }
-  };
-  
-  tabs.forEach(t => {
-     const btn = qs(`#nav-${t}`);
-     if(btn) btn.onclick = () => switchTab(`tab-${t}`);
-     // Mobile quick actions
-     const qa = qs(`#qa-${t}`);
-     if(qa) qa.onclick = () => switchTab(`tab-${t}`);
-  });
+    // Hide administrative/advanced sections
+    hideIt('staff');
+    hideIt('reports');
+    hideIt('rates');
+    hideIt('products');
+    hideIt('inventory');
+    
+    // Permission based hiding
+    if(!p.includes('stock_in')) hideIt('stock-in');
+    if(!p.includes('stock_out')) hideIt('stock-out');
+    if(!(p.includes('add_retailer') || p.includes('payment_cash') || p.includes('payment_online'))) hideIt('retailers');
+  }
   
   loadDistDashboard();
 }
@@ -178,10 +404,10 @@ async function loadDistributor(){
 async function loadDistDashboard(){
   try{
     const stats = await api('/api/my/stats');
-    qs('#dStatInventory').textContent = stats.inventoryCount;
-    qs('#dStatLowStock').textContent = stats.lowStockCount;
-    qs('#dStatRetailers').textContent = stats.retailerCount;
-    qs('#dStatOrders').textContent = stats.todayOrders;
+    if(qs('#dStatInventory')) qs('#dStatInventory').textContent = stats.inventoryCount || 0;
+    if(qs('#dStatLowStock')) qs('#dStatLowStock').textContent = stats.lowStockCount || 0;
+    if(qs('#dStatRetailers')) qs('#dStatRetailers').textContent = stats.retailerCount || 0;
+    if(qs('#dStatOrders')) qs('#dStatOrders').textContent = stats.todayOrders || 0;
   }catch(e){ console.error(e); }
 }
 
@@ -195,8 +421,8 @@ async function bindDistProductAdd(){
       sel.innerHTML='<option value="">-</option>' + units.map(u=>{
         let label = u.symbol;
         if(u.type==='Compound'){
-           const f = unitMap[u.firstUnit] ? unitMap[u.firstUnit].symbol : '?';
-           const s = unitMap[u.secondUnit] ? unitMap[u.secondUnit].symbol : '?';
+           const f = (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]) ? (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]).symbol : '?';
+           const s = (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]) ? (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]).symbol : '?';
            label += ` (${f} → ${s} × ${u.conversionFactor})`;
         } else if(u.formalName){
            label += ` (${u.formalName})`;
@@ -254,8 +480,8 @@ async function renderDistProductsGrid(selector){
     const unitOptions = '<option value="">-</option>' + units.map(u=>{
       let label = u.symbol;
       if(u.type==='Compound'){
-         const f = unitMap[u.firstUnit] ? unitMap[u.firstUnit].symbol : '?';
-         const s = unitMap[u.secondUnit] ? unitMap[u.secondUnit].symbol : '?';
+         const f = (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]) ? (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]).symbol : '?';
+         const s = (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]) ? (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]).symbol : '?';
          label += ` (${f} → ${s} × ${u.conversionFactor})`;
       } else if(u.formalName){
          label += ` (${u.formalName})`;
@@ -357,6 +583,8 @@ async function renderInventoryStatus(){
   try {
     const products = await api('/api/products');
     const inv = await api('/api/my/inventory');
+    const units = await api('/api/units');
+    const unitMap = {}; units.forEach(u => unitMap[u._id] = u);
     const invMap = {};
     inv.forEach(i => { invMap[i.productId] = Number(i.quantity) || 0; });
 
@@ -369,6 +597,8 @@ async function renderInventoryStatus(){
         if(qty > 10) badgeClass = 'bg-success';
         else if(qty > 0) badgeClass = 'bg-warning text-dark';
         
+        const qtyStr = formatUnitQty(qty, p.unit, unitMap);
+        
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>
@@ -376,13 +606,23 @@ async function renderInventoryStatus(){
             <div class="text-muted small">${p.nameHindi}</div>
           </td>
           <td class="text-end">
-            <span class="badge ${badgeClass} fs-6">${qty}</span>
+            <span class="badge ${badgeClass} fs-6">${qtyStr}</span>
           </td>
         `;
         tbody.appendChild(tr);
       });
     }
   } catch (e) { console.error(e); }
+}
+
+async function addSupplierPrompt(){
+  const name = prompt('Enter new supplier name:');
+  if(!name) return;
+  try{
+    await api('/api/my/suppliers',{ method:'POST', body: JSON.stringify({ name }) });
+    alert('Supplier added');
+    renderStockIn();
+  }catch(e){ alert(e.message); }
 }
 
 async function renderStockIn(){
@@ -420,27 +660,27 @@ async function renderStockIn(){
       tbody.innerHTML = '';
       products.forEach(p => {
         if(p.source === 'global' && !p.active) return;
-        const u = p.unit ? unitMap[p.unit] : null;
+        const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
-        const first = isCompound ? unitMap[u.firstUnit] : null;
-        const second = isCompound ? unitMap[u.secondUnit] : null;
+        const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
+        const second = isCompound ? (u.secondUnit && typeof u.secondUnit === 'object' ? u.secondUnit : (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit])) : null;
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         const curQty = invMap[p._id] || 0;
         const qtyCell = isCompound
           ? `<div class="input-group input-group-sm">
-               <input type="number" class="form-control form-control-sm in-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
+               <input type="number" class="form-control form-control-sm qty-narrow in-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
                <span class="input-group-text">+</span>
-               <input type="number" class="form-control form-control-sm in-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
+               <input type="number" class="form-control form-control-sm qty-narrow in-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
              </div>
-             <div class="small text-muted">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
-          : `<input type="number" class="form-control form-control-sm in-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
+             <div class="small text-muted sm-hide">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
+          : `<input type="number" class="form-control form-control-sm qty-narrow in-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>
             <div class="fw-bold small">${p.nameEnglish}</div>
-            <div class="text-muted small">${p.nameHindi||''}</div>
+            <div class="text-muted small sm-hide">${p.nameHindi||''}</div>
           </td>
-          <td class="text-center"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${curQty}</span></td>
+          <td class="text-center col-stock"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${formatUnitQty(curQty, p.unit, unitMap)}</span></td>
           <td>${qtyCell}</td>
         `;
         tbody.appendChild(tr);
@@ -454,7 +694,7 @@ async function renderStockIn(){
           if(!supplierId) throw new Error('Select supplier');
           const moves = [];
           products.forEach(p => {
-            const u = p.unit ? unitMap[p.unit] : null;
+            const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
             const isCompound = u && String(u.type) === 'Compound';
             const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
             let qty = 0;
@@ -500,6 +740,7 @@ async function renderStockIn(){
       newBtn.addEventListener('click', handler);
     }
 
+    loadStockInHistory();
   } catch (e) { console.error(e); }
 }
 
@@ -562,36 +803,39 @@ async function renderStockOut(){
       products.forEach(p => {
         if(p.source === 'global' && !p.active) return;
         const stock = invMap[p._id] || 0;
-        const u = p.unit ? unitMap[p.unit] : null;
+        const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
-        const first = isCompound ? unitMap[u.firstUnit] : null;
-        const second = isCompound ? unitMap[u.secondUnit] : null;
+        const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
+        const second = isCompound ? (u.secondUnit && typeof u.secondUnit === 'object' ? u.secondUnit : (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit])) : null;
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         const price = getPrice(p._id);
+        
+        // Price Display: if compound, show per First Unit. Else per Unit.
+        const priceUnitSymbol = isCompound ? (first?first.symbol:'Base') : (u?u.symbol:'unit');
 
         const tr = document.createElement('tr');
         const qtyCell = isCompound
           ? `<div class="input-group input-group-sm">
-               <input type="number" class="form-control form-control-sm out-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
+               <input type="number" class="form-control form-control-sm qty-narrow out-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
                <span class="input-group-text">+</span>
-               <input type="number" class="form-control form-control-sm out-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
+               <input type="number" class="form-control form-control-sm qty-narrow out-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
              </div>
-             <div class="small text-muted">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
-          : `<input type="number" class="form-control form-control-sm out-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
+             <div class="small text-muted sm-hide">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
+          : `<input type="number" class="form-control form-control-sm qty-narrow out-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
 
         tr.innerHTML = `
           <td>
             <div class="fw-bold">${p.nameEnglish}</div>
-            <div class="text-muted small">${p.nameHindi||''}</div>
-            <div class="small text-muted">₹${price.toFixed(2)} / ${second?second.symbol:(u?u.symbol:'unit')}</div>
+            <div class="text-muted small sm-hide">${p.nameHindi||''}</div>
+            <div class="small text-muted sm-hide">₹${price.toFixed(2)} / ${priceUnitSymbol}</div>
           </td>
-          <td class="text-center">
-            <span class="badge ${stock>0?'bg-success':'bg-secondary'}">${stock}</span>
+          <td class="text-center col-stock">
+            <span class="badge ${stock>0?'bg-success':'bg-secondary'}">${formatUnitQty(stock, p.unit, unitMap)}</span>
           </td>
           <td>${qtyCell}</td>
           <td class="text-end">
             <div id="amt-${p._id}" class="fw-bold">₹0</div>
-            <div id="brk-${p._id}" class="small text-muted"></div>
+            <div id="brk-${p._id}" class="small text-muted sm-hide"></div>
           </td>
         `;
         tbody.appendChild(tr);
@@ -602,7 +846,7 @@ async function renderStockOut(){
     const computeTotalAndAmounts = () => {
       let subtotal = 0;
       products.forEach(p => {
-        const u = p.unit ? unitMap[p.unit] : null;
+        const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         const price = getPrice(p._id);
@@ -614,12 +858,20 @@ async function renderStockOut(){
           const av = Number(a && a.value || 0);
           const bv = Number(b && b.value || 0);
           qty = (av*conv) + bv;
-          if(av>0 || bv>0){ brk = `${av||0} ${unitMap[u.firstUnit]?unitMap[u.firstUnit].symbol:''} + ${bv||0} ${unitMap[u.secondUnit]?unitMap[u.secondUnit].symbol:''} = ${qty}`; }
+          if(av>0 || bv>0){ brk = `${av||0} ${(u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])?(u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]).symbol:''} + ${bv||0} ${(u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit])?(u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]).symbol:''} = ${qty}`; }
         } else {
           const s = qs(`.out-simple[data-id="${p._id}"]`);
           qty = Number(s && s.value || 0);
         }
-        const amt = price * qty;
+        
+        let amt = 0;
+        if (isCompound && conv > 0) {
+           // Price is per First Unit, qty is total Second Units
+           amt = (price / conv) * qty;
+        } else {
+           amt = price * qty;
+        }
+        
         const amtEl = qs(`#amt-${p._id}`);
         const brkEl = qs(`#brk-${p._id}`);
         if(amtEl) amtEl.textContent = '₹' + amt.toFixed(2);
@@ -660,7 +912,7 @@ async function renderStockOut(){
           if(!rid){ alert('Select retailer'); return; }
           const moves = [];
           for(const p of products){
-            const u = p.unit ? unitMap[p.unit] : null;
+            const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
             const isCompound = u && String(u.type) === 'Compound';
             const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
             let qty = 0;
@@ -690,7 +942,7 @@ async function renderStockOut(){
           }
           let subtotal = 0;
           products.forEach(p => {
-            const u = p.unit ? unitMap[p.unit] : null;
+            const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
             const isCompound = u && String(u.type) === 'Compound';
             const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
             const price = getPrice(p._id);
@@ -703,7 +955,12 @@ async function renderStockOut(){
               const s = qs(`.out-simple[data-id="${p._id}"]`);
               qty = Number(s && s.value || 0);
             }
-            subtotal += price * qty;
+            
+            if (isCompound && conv > 0) {
+               subtotal += (price / conv) * qty;
+            } else {
+               subtotal += price * qty;
+            }
           });
           if(subtotal > 0){
             try{ await api('/api/my/transactions',{ method:'POST', body: JSON.stringify({ retailerId: rid, type: 'order', amount: subtotal }) }); }catch(e){ errs.push(e.message||'order error'); }
@@ -726,14 +983,29 @@ async function renderStockOut(){
       newBtn.addEventListener('click', handler);
     }
 
+    loadStockOutHistory();
   } catch(e){ console.error(e); }
 }
 
 async function loadRetailer(){
   await checkRoleAndRedirect('retailer');
   bindLogout();
+  const tabs = ['order','history','profile'];
+  const switchTab = (id) => {
+    qsa('.tab-pane').forEach(el => {
+      el.classList.remove('show','active');
+      if(el.id === id) el.classList.add('show','active');
+    });
+    qsa('.nav-link').forEach(el => el.classList.remove('active'));
+    const navBtn = qs(`button[data-bs-target="#${id}"]`);
+    if(navBtn) navBtn.classList.add('active');
+    if(id==='tab-order') { renderRetailerProducts(); }
+    if(id==='tab-history') { loadRetailerTransactions(); }
+    if(id==='tab-profile') { renderRetailerProfile(); }
+  };
+  window.switchTab = switchTab;
   renderRetailerProducts();
-  renderRetailerOrders();
+  loadRetailerTransactions();
   
   const placeBtn = qs('#placeOrderBtn');
   if(placeBtn) placeBtn.onclick = placeOrder;
@@ -749,10 +1021,10 @@ async function renderRetailerProducts(){
     
     tbody.innerHTML = '';
     products.forEach(p => {
-      const u = p.unit ? unitMap[p.unit] : null;
+      const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
       const isCompound = u && String(u.type) === 'Compound';
-      const first = isCompound ? unitMap[u.firstUnit] : null;
-      const second = isCompound ? unitMap[u.secondUnit] : null;
+      const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
+      const second = isCompound ? (u.secondUnit && typeof u.secondUnit === 'object' ? u.secondUnit : (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit])) : null;
       const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
       
       const qtyCell = isCompound
@@ -764,6 +1036,9 @@ async function renderRetailerProducts(){
            <div class="small text-muted">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
         : `<input type="number" class="form-control form-control-sm r-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         
+      // Price Display Unit
+      const priceUnitSymbol = isCompound ? (first?first.symbol:'Base') : (u?u.symbol:'unit');
+        
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>
@@ -773,7 +1048,7 @@ async function renderRetailerProducts(){
         <td class="text-center">
           <span class="badge ${p.stock>0?'bg-success':'bg-secondary'}">${p.stock}</span>
         </td>
-        <td class="text-end">₹${p.price}</td>
+        <td class="text-end">₹${p.price} / ${priceUnitSymbol}</td>
         <td>${qtyCell}</td>
       `;
       tbody.appendChild(tr);
@@ -782,7 +1057,7 @@ async function renderRetailerProducts(){
     const updateEst = () => {
       let total = 0;
       products.forEach(p => {
-        const u = p.unit ? unitMap[p.unit] : null;
+        const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         let qty = 0;
@@ -794,7 +1069,12 @@ async function renderRetailerProducts(){
           const s = qs(`.r-simple[data-id="${p._id}"]`);
           qty = Number(s && s.value || 0);
         }
-        total += qty * p.price;
+        
+        if (isCompound && conv > 0) {
+           total += qty * (p.price / conv);
+        } else {
+           total += qty * p.price;
+        }
       });
       qs('#orderTotal').textContent = '₹' + total.toFixed(2);
     };
@@ -814,7 +1094,7 @@ async function placeOrder(){
     
     const items = [];
     products.forEach(p => {
-      const u = p.unit ? unitMap[p.unit] : null;
+      const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
       const isCompound = u && String(u.type) === 'Compound';
       const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
       let qty = 0;
@@ -834,63 +1114,79 @@ async function placeOrder(){
     await api('/api/retailer/orders', { method:'POST', body: JSON.stringify({ items }) });
     alert('Order placed successfully!');
     renderRetailerProducts();
-    renderRetailerOrders();
+    loadRetailerTransactions();
     qs('#orderTotal').textContent = '₹0';
   } catch(e){ alert(e.message); }
 }
 
-async function renderRetailerOrders(){
+async function loadRetailerTransactions(){
   const list = qs('#orderHistoryList');
   if(!list) return;
+  
+  const type = qs('#txFilterType') ? qs('#txFilterType').value : '';
+  const from = qs('#txFilterFrom') ? qs('#txFilterFrom').value : '';
+  const to = qs('#txFilterTo') ? qs('#txFilterTo').value : '';
+
   try {
-    const orders = await api('/api/retailer/orders');
-    console.log('Orders received:', orders);
+    let url = '/api/retailer/transactions';
+    const params = [];
+    if(type) params.push(`type=${encodeURIComponent(type)}`);
+    if(from) params.push(`from=${encodeURIComponent(from)}`);
+    if(to) params.push(`to=${encodeURIComponent(to)}`);
+    if(params.length) url += '?' + params.join('&');
+
+    const txs = await api(url);
     list.innerHTML = '';
-    if(orders.length === 0){ list.innerHTML = '<div class="text-muted p-3">No orders found</div>'; return; }
+    if(txs.length === 0){ list.innerHTML = '<div class="text-muted p-3">No transactions found</div>'; return; }
     
-    orders.forEach(o => {
-      const date = new Date(o.createdAt).toLocaleString();
+    txs.forEach(t => {
+      const date = new Date(t.createdAt).toLocaleString();
       const div = document.createElement('div');
       div.className = 'card p-3 mb-2';
-      let itemsHtml = '<ul class="mb-0 ps-3 small">';
-      o.items.forEach(i => {
-         const p = i.productId;
-         let name = p ? p.nameEnglish : '?';
-         let qtyStr = i.quantity;
-         
-         // Logic for compound unit display
-         // Debug: check what we have
-         // console.log('Item:', name, 'Unit:', p?.unit);
-
-         if(p && p.unit && String(p.unit.type).trim().toLowerCase() === 'compound' && p.unit.conversionFactor){
-           const conv = Number(p.unit.conversionFactor);
-           if(conv > 0) {
-             const first = Math.floor(i.quantity / conv);
-             const second = i.quantity % conv;
-             const s1 = (p.unit.firstUnit && p.unit.firstUnit.symbol) ? p.unit.firstUnit.symbol : 'Box';
-             const s2 = (p.unit.secondUnit && p.unit.secondUnit.symbol) ? p.unit.secondUnit.symbol : 'Pouch';
-             
-             if(first > 0 && second > 0) qtyStr = `${first} ${s1} + ${second} ${s2}`;
-             else if(first > 0) qtyStr = `${first} ${s1}`;
-             else qtyStr = `${second} ${s2}`;
-           }
-         } else if (p && p.unit && p.unit.symbol) {
-            qtyStr += ` ${p.unit.symbol}`;
-         }
-         
-         const totalItem = (i.price * i.quantity).toFixed(2);
-         itemsHtml += `<li>${name} <br> <span class="text-muted">${qtyStr} @ ₹${i.price.toFixed(2)} = ₹${totalItem}</span></li>`;
-      });
-      itemsHtml += '</ul>';
       
+      let content = '';
+      if(t.type === 'order' && t.items){
+          let itemsHtml = '<ul class="mb-0 ps-3 small">';
+          t.items.forEach(i => {
+             const p = i.productId;
+             let name = p ? p.nameEnglish : '?';
+             let qtyStr = i.quantity;
+    
+             if(p && p.unit && String(p.unit.type).trim().toLowerCase() === 'compound' && p.unit.conversionFactor){
+               const conv = Number(p.unit.conversionFactor);
+               if(conv > 0) {
+                 const first = Math.floor(i.quantity / conv);
+                 const second = i.quantity % conv;
+                 const s1 = (p.unit.firstUnit && p.unit.firstUnit.symbol) ? p.unit.firstUnit.symbol : 'Box';
+                 const s2 = (p.unit.secondUnit && p.unit.secondUnit.symbol) ? p.unit.secondUnit.symbol : 'Pouch';
+                 
+                 if(first > 0 && second > 0) qtyStr = `${first} ${s1} + ${second} ${s2}`;
+                 else if(first > 0) qtyStr = `${first} ${s1}`;
+                 else qtyStr = `${second} ${s2}`;
+               }
+             } else if (p && p.unit && p.unit.symbol) {
+                qtyStr += ` ${p.unit.symbol}`;
+             }
+             
+             const totalItem = (i.price * i.quantity).toFixed(2);
+             itemsHtml += `<li>${name} <br> <span class="text-muted">${qtyStr} @ ₹${i.price.toFixed(2)} = ₹${totalItem}</span></li>`;
+          });
+          itemsHtml += '</ul>';
+          content = `<div class="mt-2">${itemsHtml}</div>`;
+      } else {
+          content = `<div class="mt-2 text-muted fst-italic">${t.type} - ${t.note || ''}</div>`;
+      }
+      
+      const badgeClass = t.type === 'order' ? 'bg-primary' : (t.type.startsWith('payment') ? 'bg-success' : 'bg-secondary');
+
       div.innerHTML = `
         <div class="d-flex justify-content-between">
-           <div class="fw-bold">#${o._id.substr(-6)}</div>
-           <div class="badge bg-${o.status==='pending'?'warning':'success'} text-uppercase">${o.status}</div>
+           <div class="fw-bold">#${t._id.substr(-6)}</div>
+           <div class="badge ${badgeClass} text-uppercase">${t.type}</div>
         </div>
         <div class="small text-muted">${date}</div>
-        <div class="mt-2">${itemsHtml}</div>
-        <div class="mt-2 fw-bold text-end">Total: ₹${o.totalAmount.toFixed(2)}</div>
+        ${content}
+        <div class="mt-2 fw-bold text-end">Amount: ₹${t.amount.toFixed(2)}</div>
       `;
       list.appendChild(div);
     });
@@ -898,13 +1194,16 @@ async function renderRetailerOrders(){
 }
 
 function loadRetailers(){
-  const list = qs('#retailerList');
+  const list = qs('#retList');
   if(!list) return;
+  const perms = (ROLE === 'staff' && Array.isArray(window.PERM)) ? window.PERM : [];
   api('/api/my/retailers').then(retailers => {
     list.innerHTML = '';
     retailers.forEach(r => {
       const div = document.createElement('div');
       div.className = 'list-group-item d-flex justify-content-between align-items-center';
+      const canPay = ROLE !== 'staff' || perms.includes('payment_cash') || perms.includes('payment_online');
+      const payBtnHtml = canPay ? `<button class="btn btn-sm btn-outline-primary" onclick="preparePayment('${r._id}', '${r.name}', ${r.currentBalance||0})" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-currency-rupee"></i></button>` : '';
       div.innerHTML = `
         <div>
           <div class="fw-bold">${r.name}</div>
@@ -915,7 +1214,7 @@ function loadRetailers(){
           <div class="fw-bold ${r.currentBalance > 0 ? 'text-danger' : 'text-success'}">₹${(r.currentBalance||0).toFixed(2)}</div>
           <div class="d-flex gap-1">
              <button class="btn btn-sm btn-outline-info" data-act="ledger" data-id="${r._id}" title="Ledger"><i class="bi bi-journal-text"></i></button>
-             <button class="btn btn-sm btn-outline-primary" onclick="preparePayment('${r._id}', '${r.name}')" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-currency-rupee"></i></button>
+             ${payBtnHtml}
           </div>
         </div>
       `;
@@ -938,11 +1237,29 @@ function loadRetailers(){
   });
 }
 
-async function preparePayment(id, name){
+async function preparePayment(id, name, currentBalance){
   qs('#payRetailerName').textContent = name;
   qs('#payRetailerId').value = id;
   qs('#payAmount').value = '';
   qs('#payNote').value = '';
+  const balEl = qs('#payCurrentBalance');
+  if(balEl) {
+     const bal = Number(currentBalance)||0;
+     balEl.textContent = '₹ ' + bal.toFixed(2);
+     balEl.className = 'fw-bold ' + (bal>0 ? 'text-danger' : 'text-success');
+  }
+  const typeSel = qs('#payType');
+  const saveBtn = qs('#paySave');
+  if(typeSel){
+    const perms = (ROLE === 'staff' && Array.isArray(window.PERM)) ? window.PERM : [];
+    const allowCash = ROLE !== 'staff' || perms.includes('payment_cash');
+    const allowOnline = ROLE !== 'staff' || perms.includes('payment_online');
+    let html = '';
+    if(allowCash) html += '<option value="payment_cash">Cash</option>';
+    if(allowOnline) html += '<option value="payment_online">Online</option>';
+    typeSel.innerHTML = html;
+    if(saveBtn) saveBtn.disabled = (!allowCash && !allowOnline);
+  }
 }
 
 async function submitPayment(){
@@ -953,6 +1270,10 @@ async function submitPayment(){
     const note = qs('#payNote').value;
     
     if(!amount || amount <= 0) throw new Error('Invalid amount');
+    if(ROLE === 'staff'){
+      const perms = Array.isArray(window.PERM) ? window.PERM : [];
+      if(!perms.includes(type)) throw new Error('Not permitted for selected payment type');
+    }
     
   await api('/api/my/transactions', {
     method: 'POST',
@@ -1218,6 +1539,9 @@ async function renderReport(){
       }); }
     }
     if(cnt) cnt.textContent = String(data.length||0);
+    if(data.length === 0 && tbody) {
+       tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-3">No data found</td></tr>';
+    }
     window.REP_HEADER = header;
     window.REP_DATA = data;
   }catch(e){ console.error(e); }
@@ -1227,8 +1551,109 @@ function loadStaff(){
   // ... implementation
 }
 
-function loadDistRates(){
-  // ... implementation
+async function loadDistRates(){
+  const sel = qs('#rateRetailerSel');
+  if(!sel) return;
+  
+  try {
+    const retailers = await api('/api/my/retailers');
+    sel.innerHTML = '<option value="">Default Rates (All Retailers)</option>' + 
+                    retailers.map(r => `<option value="${r._id}">${r.name}</option>`).join('');
+    
+    // Initial render for Default Rates
+    await renderRatesTable();
+    
+  } catch(e){ console.error(e); }
+}
+
+async function renderRatesTable(){
+  const sel = qs('#rateRetailerSel');
+  const tbody = qs('#rateRows');
+  if(!sel || !tbody) return;
+  
+  const retailerId = sel.value;
+  tbody.innerHTML = '<tr><td colspan="3" class="text-center">Loading...</td></tr>';
+  
+  try {
+    const products = await api('/api/my/products');
+    const distRates = await api('/api/my/rates');
+    let retailerRates = [];
+    if(retailerId){
+       retailerRates = await api(`/api/my/retailers/${retailerId}/rates`);
+    }
+    
+    const distRateMap = {};
+    distRates.forEach(r => distRateMap[r.productId] = r.price);
+    
+    const retRateMap = {};
+    retailerRates.forEach(r => retRateMap[r.productId] = r.price);
+    
+    tbody.innerHTML = '';
+    
+    products.forEach(p => {
+       if(p.source === 'global' && !p.active) return;
+       
+       const tr = document.createElement('tr');
+       const defPrice = distRateMap[p._id];
+       const retPrice = retRateMap[p._id];
+       
+       const u = p.unit;
+       const isCompound = u && String(u.type) === 'Compound';
+       const symbol = isCompound ? (u.firstUnit && u.firstUnit.symbol ? u.firstUnit.symbol : 'Unit') : (u ? u.symbol : 'Unit');
+       const label = `<span class="text-muted small">/ ${symbol}</span>`;
+
+       let defInput = '';
+       let retInput = '';
+       
+       if(retailerId){
+          // Retailer Mode: Default is Read-Only, Retailer is Input
+          defInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" disabled><span class="input-group-text">${symbol}</span></div>`;
+          retInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control rate-ret-inp" data-pid="${p._id}" value="${retPrice !== undefined ? Number(retPrice).toFixed(0) : ''}" placeholder="Override"><span class="input-group-text">${symbol}</span></div>`;
+       } else {
+          // Default Mode: Default is Input, Retailer is N/A
+          defInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control rate-def-inp" data-pid="${p._id}" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" placeholder="Set Default"><span class="input-group-text">${symbol}</span></div>`;
+          retInput = `<span class="text-muted">-</span>`;
+       }
+       
+       tr.innerHTML = `
+         <td>
+           <div class="fw-bold small">${p.nameEnglish}</div>
+           <div class="text-muted small">${p.nameHindi||''}</div>
+         </td>
+         <td>${defInput}</td>
+         <td>${retInput}</td>
+       `;
+       tbody.appendChild(tr);
+    });
+    
+    // Attach event listeners
+    qsa('.rate-def-inp').forEach(i => i.addEventListener('change', async (e) => {
+       const pid = e.target.dataset.pid;
+       const price = Number(e.target.value);
+       if(pid && price >= 0){
+          try {
+             await api('/api/my/rates', { method: 'POST', body: JSON.stringify({ productId: pid, price }) });
+             e.target.classList.add('is-valid');
+             setTimeout(()=>e.target.classList.remove('is-valid'), 1000);
+          } catch(err){ alert(err.message); }
+       }
+    }));
+    
+    qsa('.rate-ret-inp').forEach(i => i.addEventListener('change', async (e) => {
+       const pid = e.target.dataset.pid;
+       const price = Number(e.target.value);
+       if(pid && price >= 0){
+          try {
+             await api(`/api/my/retailers/${retailerId}/rates`, { method: 'POST', body: JSON.stringify({ productId: pid, price }) });
+             e.target.classList.add('is-valid');
+             setTimeout(()=>e.target.classList.remove('is-valid'), 1000);
+          } catch(err){ alert(err.message); }
+       }
+    }));
+    
+  } catch(e){ 
+    tbody.innerHTML = `<tr><td colspan="3" class="text-danger">Error: ${e.message}</td></tr>`;
+  }
 }
 
 // Initial
@@ -1239,8 +1664,180 @@ else if(path.includes('retailer.html')) { loadRetailer(); }
 else {
   const loginBtn = qs('#loginBtn');
   if(loginBtn) loginBtn.onclick = login;
-  checkAuth();
 }
+
+// --- History / Edit Extensions ---
+
+async function loadStockInHistory(){
+  const tabId = 'tab-stock-in';
+  const containerId = 'stockInHistory';
+  let container = qs('#'+containerId);
+  if(!container){
+     const parent = qs('#'+tabId); 
+     if(parent){
+       const div = document.createElement('div');
+       div.id = containerId;
+       div.className = 'card p-3 shadow-sm border-0 mt-3';
+       div.innerHTML = `
+         <div class="d-flex justify-content-between align-items-center mb-2">
+           <div class="fw-bold">Daily History (Edit)</div>
+           <button class="btn btn-sm btn-outline-secondary" onclick="loadStockInHistory()"><i class="bi bi-arrow-repeat"></i></button>
+         </div>
+         <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+            <input type="date" id="stockInHistDate" class="form-control form-control-sm" style="max-width:150px">
+            <select id="stockInHistSup" class="form-select form-select-sm" style="max-width:200px"><option value="">All Suppliers</option></select>
+            <button class="btn btn-sm btn-primary" onclick="loadStockInHistory()">Load</button>
+         </div>
+         <div class="table-responsive">
+            <table class="table table-sm table-striped small align-middle">
+               <thead><tr><th>Time</th><th>Product</th><th>Supplier</th><th>Qty</th><th>Action</th></tr></thead>
+               <tbody id="stockInHistRows"></tbody>
+            </table>
+         </div>
+       `;
+       parent.appendChild(div);
+       
+       const today = new Date();
+       today.setMinutes(today.getMinutes() - today.getTimezoneOffset() + 330);
+       qs('#stockInHistDate').value = today.toISOString().slice(0,10);
+     }
+  }
+  
+  const date = qs('#stockInHistDate').value;
+  const supId = qs('#stockInHistSup').value;
+  
+  try {
+     const supSel = qs('#stockInHistSup');
+     if(supSel && supSel.options.length <= 1){
+        const sups = await api('/api/my/suppliers');
+        supSel.innerHTML = '<option value="">All Suppliers</option>' + sups.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+        if(supId) supSel.value = supId;
+     }
+  
+     const units = await api('/api/units');
+     globalUnitMap = {}; units.forEach(u => globalUnitMap[u._id] = u);
+
+     let url = `/api/my/stock-moves?type=IN&from=${date}&to=${date}`;
+     if(supId) url += `&supplierId=${supId}`; 
+     
+     const moves = await api(url);
+     moves.forEach(m => globalStockMoves[m._id] = m);
+
+     const tbody = qs('#stockInHistRows');
+     if(tbody){
+        tbody.innerHTML = '';
+        if(moves.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No records</td></tr>'; return; }
+        
+        moves.forEach(m => {
+           const time = new Date(m.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+           const pName = m.productId ? m.productId.nameEnglish : '?';
+           const sName = m.supplierId ? (m.supplierId.name || 'Unknown') : '-'; 
+           
+           const qtyStr = formatUnitQty(m.quantity, m.productId ? m.productId.unit : null, globalUnitMap);
+
+           const tr = document.createElement('tr');
+           tr.innerHTML = `
+             <td>${time}</td>
+             <td>${pName}</td>
+             <td>${sName}</td>
+             <td>${qtyStr}</td>
+             <td><button class="btn btn-sm btn-outline-primary py-0" onclick="openEditStockMove('${m._id}')">Edit</button></td>
+           `;
+           tbody.appendChild(tr);
+        });
+     }
+  } catch(e){ console.error(e); }
+}
+
+async function loadStockOutHistory(){
+  const tabId = 'tab-stock-out';
+  const containerId = 'stockOutHistory';
+  let container = qs('#'+containerId);
+  if(!container){
+     const parent = qs('#'+tabId); 
+     if(parent){
+       const div = document.createElement('div');
+       div.id = containerId;
+       div.className = 'card p-3 shadow-sm border-0 mt-3';
+       div.innerHTML = `
+         <div class="d-flex justify-content-between align-items-center mb-2">
+           <div class="fw-bold">Daily History (Edit)</div>
+           <button class="btn btn-sm btn-outline-secondary" onclick="loadStockOutHistory()"><i class="bi bi-arrow-repeat"></i></button>
+         </div>
+         <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+            <input type="date" id="stockOutHistDate" class="form-control form-control-sm" style="max-width:150px">
+            <select id="stockOutHistRet" class="form-select form-select-sm" style="max-width:200px"><option value="">All Retailers</option></select>
+            <button class="btn btn-sm btn-primary" onclick="loadStockOutHistory()">Load</button>
+         </div>
+         <div class="table-responsive">
+            <table class="table table-sm table-striped small align-middle">
+               <thead><tr><th>Time</th><th>Product</th><th>Retailer</th><th>Qty</th><th>Action</th></tr></thead>
+               <tbody id="stockOutHistRows"></tbody>
+            </table>
+         </div>
+       `;
+       parent.appendChild(div);
+       
+       const today = new Date();
+       today.setMinutes(today.getMinutes() - today.getTimezoneOffset() + 330);
+       qs('#stockOutHistDate').value = today.toISOString().slice(0,10);
+     }
+  }
+  
+  const date = qs('#stockOutHistDate').value;
+  
+  try {
+     const rSel = qs('#stockOutHistRet');
+     if(rSel && rSel.options.length <= 1){
+        const rets = await api('/api/my/retailers');
+        rSel.innerHTML = '<option value="">All Retailers</option>' + rets.map(r=>`<option value="${r._id}">${r.name}</option>`).join('');
+     }
+     
+     const units = await api('/api/units');
+     globalUnitMap = {}; units.forEach(u => globalUnitMap[u._id] = u);
+     
+     const rId = rSel.value;
+     let url = `/api/my/stock-moves?type=OUT&from=${date}&to=${date}`;
+     if(rId) url += `&retailerId=${rId}`;
+     
+     const moves = await api(url);
+     moves.forEach(m => globalStockMoves[m._id] = m);
+
+     const tbody = qs('#stockOutHistRows');
+     if(tbody){
+        tbody.innerHTML = '';
+        if(moves.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No records</td></tr>'; return; }
+        
+        moves.forEach(m => {
+           const time = new Date(m.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+           const pName = m.productId ? m.productId.nameEnglish : '?';
+           const rName = m.retailerId ? (m.retailerId.name || 'Unknown') : '-'; 
+           
+           const qtyStr = formatUnitQty(m.quantity, m.productId ? m.productId.unit : null, globalUnitMap);
+           
+           const tr = document.createElement('tr');
+           tr.innerHTML = `
+             <td>${time}</td>
+             <td>${pName}</td>
+             <td>${rName}</td>
+             <td>${qtyStr}</td>
+             <td><button class="btn btn-sm btn-outline-primary py-0" onclick="openEditStockMove('${m._id}')">Edit</button></td>
+           `;
+           tbody.appendChild(tr);
+        });
+     }
+  } catch(e){ console.error(e); }
+}
+
+try{
+  if(path.includes('distributor.html') || path.includes('retailer.html')){
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', function(ev){
+      if(typeof window.handleBack === 'function') window.handleBack();
+      try{ history.pushState(null, '', location.href); }catch{}
+    });
+  }
+}catch{}
 
 async function renderLedgerModal(retailer) {
   try {
@@ -1283,7 +1880,11 @@ async function renderLedgerModal(retailer) {
       let amt = t.amount || 0;
       
       if (t.type === 'order') {
-        typeBadge = '<span class="badge bg-primary">Order</span>';
+        if (t.referenceId) {
+             typeBadge = `<span class="badge bg-primary" style="cursor:pointer" onclick="showOrderDetails('${t.referenceId}')">Order <i class="bi bi-info-circle"></i></span>`;
+        } else {
+             typeBadge = '<span class="badge bg-primary">Order</span>';
+        }
         amountClass = 'text-danger';
         sign = '+';
       } else {
@@ -1318,8 +1919,8 @@ function renderUnitDetailModal(u, unitMap){
   `;
   
   if(u.type === 'Compound'){
-    const f = unitMap[u.firstUnit] || {};
-    const s = unitMap[u.secondUnit] || {};
+    const f = (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit]) || {};
+    const s = (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit]) || {};
     const fSym = f.symbol || '?';
     const sSym = s.symbol || '?';
     const fName = f.formalName ? `(${f.formalName})` : '';
@@ -1417,3 +2018,398 @@ window.showOrderDetails = async function(orderId) {
         content.innerHTML = '<div class="text-danger">Failed to load order details</div>';
     }
 };
+
+
+async function renderRetailerProfile(){
+
+  const el = qs('#retailerProfileContent');
+
+  if(!el) return;
+
+  
+
+  try {
+
+    const me = await api('/api/me');
+
+    let html = `
+
+      <div class="mb-3">
+
+        <label class="form-label text-muted">Name</label>
+
+        <div class="fw-bold">${me.name}</div>
+
+      </div>
+
+      <div class="mb-3">
+
+        <label class="form-label text-muted">Email</label>
+
+        <div>${me.email}</div>
+
+      </div>
+
+      <div class="mb-3">
+
+        <label class="form-label text-muted">Role</label>
+
+        <span class="badge bg-secondary">${me.role}</span>
+
+      </div>
+
+      <div class="mb-3">
+
+        <label class="form-label text-muted">Phone</label>
+
+        <div>${me.phone || '-'}</div>
+
+      </div>
+
+      <div class="mb-3">
+
+        <label class="form-label text-muted">Address</label>
+
+        <div>${me.address || '-'}</div>
+
+      </div>
+
+    `;
+
+    
+
+    if(!me.profileEditedOnce){
+
+       html += `
+
+         <hr>
+
+         <div class="alert alert-info small">You can edit your profile details once.</div>
+
+         <div class="mb-2"><label class="form-label">Name</label><input id="myProfileName" class="form-control" value="${me.name}"></div>
+
+         <div class="mb-2"><label class="form-label">Phone</label><input id="myProfilePhone" class="form-control" value="${me.phone||''}"></div>
+
+         <div class="mb-2"><label class="form-label">Address</label><textarea id="myProfileAddress" class="form-control">${me.address||''}</textarea></div>
+
+         <button class="btn btn-primary w-100 mt-2" onclick="saveMyProfile()">Save Profile</button>
+
+       `;
+
+    }
+
+    
+
+    el.innerHTML = html;
+
+  } catch(e){
+
+    el.innerHTML = `<div class="text-danger">${e.message}</div>`;
+
+  }
+
+}
+
+
+
+async function saveMyProfile(){
+
+  const name = qs('#myProfileName').value;
+
+  const phone = qs('#myProfilePhone').value;
+
+  const address = qs('#myProfileAddress').value;
+
+  
+
+  if(!name) { alert('Name required'); return; }
+
+  
+
+  try {
+
+    await api('/api/me/profile', { method:'PATCH', body: JSON.stringify({ name, phone, address }) });
+
+    alert('Profile updated');
+
+    renderRetailerProfile();
+
+  } catch(e){ alert(e.message); }
+
+}
+
+
+async function loadStaff() {
+  const tbody = qs('#staffList');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="4" class="text-center">Loading...</td></tr>';
+  try {
+    const staff = await api('/api/my/staff');
+    tbody.innerHTML = '';
+    if (staff.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No staff found.</td></tr>';
+      return;
+    }
+    staff.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${s.name}</td>
+        <td>${s.email}</td>
+        <td><span class="badge bg-secondary">${s.role}</span></td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary me-1" onclick="editStaff('${s._id}')"><i class="bi bi-pencil"></i></button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-danger">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function bindStaffForm() {
+  // logic is handled by prepareAddStaff and saveStaff global functions or onclicks
+}
+
+function prepareAddStaff() {
+  qs('#staffId').value = '';
+  qs('#staffName').value = '';
+  qs('#staffEmail').value = '';
+  qs('#staffEmail').disabled = false;
+  qs('#staffPassword').value = '';
+  qs('#staffPassword').placeholder = 'Password';
+  qsa('.staff-perm').forEach(c => c.checked = false);
+  qs('#staffDeleteBtn').classList.add('d-none');
+  qs('.modal-title', '#staffModal').textContent = 'Add Staff';
+}
+
+async function editStaff(id) {
+  try {
+    const staffList = await api('/api/my/staff');
+    const s = staffList.find(x => x._id === id);
+    if (!s) return;
+    
+    qs('#staffId').value = s._id;
+    qs('#staffName').value = s.name;
+    qs('#staffEmail').value = s.email;
+    qs('#staffEmail').disabled = true;
+    qs('#staffPassword').value = '';
+    qs('#staffPassword').placeholder = 'Leave blank to keep current';
+    
+    qsa('.staff-perm').forEach(c => {
+      c.checked = s.permissions && s.permissions.includes(c.value);
+    });
+    
+    qs('#staffDeleteBtn').classList.remove('d-none');
+    qs('.modal-title', '#staffModal').textContent = 'Edit Staff';
+    
+    const m = new bootstrap.Modal(qs('#staffModal'));
+    m.show();
+  } catch (e) { alert(e.message); }
+}
+
+async function saveStaff() {
+  const id = qs('#staffId').value;
+  const name = qs('#staffName').value;
+  const email = qs('#staffEmail').value;
+  const password = qs('#staffPassword').value;
+  const permissions = [];
+  qsa('.staff-perm').forEach(c => { if (c.checked) permissions.push(c.value); });
+
+  if (!name || (!id && !email) || (!id && !password)) {
+    alert('Name, Email and Password are required for new staff');
+    return;
+  }
+
+  const body = { name, permissions };
+  if (email) body.email = email;
+  if (password) body.password = password;
+
+  try {
+    if (id) {
+      await api(`/api/my/staff/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      await api('/api/my/staff', { method: 'POST', body: JSON.stringify(body) });
+    }
+    const el = qs('#staffModal');
+    const m = bootstrap.Modal.getInstance(el);
+    if (m) m.hide();
+    loadStaff();
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteStaff() {
+  const id = qs('#staffId').value;
+  if (!id || !confirm('Are you sure you want to delete this staff member?')) return;
+  try {
+    await api(`/api/my/staff/${id}`, { method: 'DELETE' });
+    const el = qs('#staffModal');
+    const m = bootstrap.Modal.getInstance(el);
+    if (m) m.hide();
+    loadStaff();
+  } catch (e) { alert(e.message); }
+}
+
+(function(){
+  function handleBack(){
+    var m = document.querySelector('.modal.show');
+    if (m) {
+      try { var inst = bootstrap.Modal.getInstance(m) || bootstrap.Modal.getOrCreateInstance(m); inst.hide(); } catch {}
+      return;
+    }
+    var p = location.pathname;
+    if (p.includes('distributor.html')) {
+      var oc = document.querySelector('.offcanvas.show');
+      if (oc) { try { var oinst = bootstrap.Offcanvas.getInstance(oc) || bootstrap.Offcanvas.getOrCreateInstance(oc); oinst.hide(); } catch {} return; }
+      var active = document.querySelector('.tab-pane.show.active');
+      if (active && active.id !== 'tab-dashboard' && typeof window.switchTab === 'function') { window.switchTab('tab-dashboard'); return; }
+      return;
+    }
+    if (p.includes('retailer.html')) {
+      var rActive = document.querySelector('.tab-pane.show.active');
+      if (rActive && rActive.id !== 'tab-order' && typeof window.switchTab === 'function') { window.switchTab('tab-order'); return; }
+      return;
+    }
+    return;
+  }
+  window.handleBack = handleBack;
+  var cap = window.Capacitor;
+  var appPlug = cap && cap.Plugins && cap.Plugins.App;
+  if (appPlug && appPlug.addListener) {
+    appPlug.addListener('backButton', handleBack);
+  } else {
+    document.addEventListener('backbutton', function(e){ e.preventDefault(); handleBack(); }, false);
+  }
+})();
+
+// --- Stock Edit Modal ---
+async function openEditStockMove(id){
+  const move = globalStockMoves[id];
+  if(!move) return;
+  
+  let modal = qs('#stockEditModal');
+  if(!modal){
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal fade" id="stockEditModal" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Edit Stock Move</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <input type="hidden" id="editMoveId">
+              <div class="mb-3">
+                <label class="form-label text-muted small">Product</label>
+                <div id="editMoveProduct" class="fw-bold"></div>
+              </div>
+              <div id="editMoveInputs" class="mb-3"></div>
+            </div>
+            <div class="modal-footer">
+               <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+               <button class="btn btn-primary" onclick="saveStockEdit()">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+    modal = qs('#stockEditModal');
+  }
+  
+  qs('#editMoveId').value = id;
+  const pName = move.productId ? (move.productId.nameEnglish || move.productId.nameHindi) : 'Unknown';
+  qs('#editMoveProduct').textContent = pName;
+  
+  const container = qs('#editMoveInputs');
+  container.innerHTML = '';
+  
+  const u = move.productId ? move.productId.unit : null;
+  let unitObj = u;
+  if(typeof u === 'string') unitObj = globalUnitMap[u];
+  
+  if(unitObj && String(unitObj.type) === 'Compound' && unitObj.conversionFactor){
+      const conv = Number(unitObj.conversionFactor);
+      const major = Math.floor(move.quantity / conv);
+      const minor = move.quantity % conv;
+      
+      let f = unitObj.firstUnit;
+      let s = unitObj.secondUnit;
+      if(typeof f === 'string') f = globalUnitMap[f];
+      if(typeof s === 'string') s = globalUnitMap[s];
+      
+      const fSym = (f && f.symbol) ? f.symbol : 'Unit 1';
+      const sSym = (s && s.symbol) ? s.symbol : 'Unit 2';
+      
+      container.innerHTML = `
+        <div class="row">
+           <div class="col-6">
+              <label class="form-label small">${fSym}</label>
+              <input type="number" id="editMoveMajor" class="form-control" value="${major}" min="0">
+           </div>
+           <div class="col-6">
+              <label class="form-label small">${sSym}</label>
+              <input type="number" id="editMoveMinor" class="form-control" value="${minor}" min="0">
+           </div>
+        </div>
+        <div class="form-text small mt-1">1 ${fSym} = ${conv} ${sSym}</div>
+      `;
+  } else {
+      const sym = unitObj ? unitObj.symbol : '';
+      container.innerHTML = `
+        <label class="form-label small">Quantity ${sym ? '('+sym+')' : ''}</label>
+        <input type="number" id="editMoveQty" class="form-control" value="${move.quantity}" min="0">
+      `;
+  }
+  
+  const bsModal = new bootstrap.Modal(modal);
+  bsModal.show();
+}
+
+async function saveStockEdit(){
+  const id = qs('#editMoveId').value;
+  const move = globalStockMoves[id];
+  if(!move) return;
+  
+  let newQty = 0;
+  
+  const u = move.productId ? move.productId.unit : null;
+  let unitObj = u;
+  if(typeof u === 'string') unitObj = globalUnitMap[u];
+  
+  if(unitObj && String(unitObj.type) === 'Compound' && unitObj.conversionFactor){
+     const major = Number(qs('#editMoveMajor').value || 0);
+     const minor = Number(qs('#editMoveMinor').value || 0);
+     const conv = Number(unitObj.conversionFactor);
+     newQty = (major * conv) + minor;
+  } else {
+     newQty = Number(qs('#editMoveQty').value || 0);
+  }
+  
+  if(newQty < 0) { alert('Invalid quantity'); return; }
+  
+  if(newQty === move.quantity){
+     const el = qs('#stockEditModal');
+     const m = bootstrap.Modal.getInstance(el);
+     if(m) m.hide();
+     return;
+  }
+
+  try {
+    await api(`/api/my/stock-moves/${id}`, { method: 'PUT', body: JSON.stringify({ quantity: newQty }) });
+    alert('Stock updated');
+    
+    const el = qs('#stockEditModal');
+    const m = bootstrap.Modal.getInstance(el);
+    if(m) m.hide();
+    
+    if(qs('#tab-stock-in') && qs('#tab-stock-in').classList.contains('active')) {
+       if(typeof renderStockIn === 'function') renderStockIn();
+       else loadStockInHistory();
+    }
+    if(qs('#tab-stock-out') && qs('#tab-stock-out').classList.contains('active')) {
+       if(typeof renderStockOut === 'function') renderStockOut();
+       else loadStockOutHistory();
+    }
+    
+  } catch(e){ alert(e.message); }
+}

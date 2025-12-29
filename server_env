@@ -1,0 +1,3 @@
+PORT=4000
+MONGODB_URI=mongodb://ujjawaltyagi9627980:T95m7OVzQY13u7J2@ac-fupcash-shard-00-00.vccmheh.mongodb.net:27017,ac-fupcash-shard-00-01.vccmheh.mongodb.net:27017,ac-fupcash-shard-00-02.vccmheh.mongodb.net:27017/amul_dist_app?replicaSet=atlas-g822cr-shard-0&ssl=true&authSource=admin
+JWT_SECRET=amul_dist_secret_key_2024

@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TextInput, View, Pressable, FlatList, Modal, ScrollView, Animated, Easing, Image } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View, Pressable, FlatList, Modal, ScrollView, Animated, Easing, Image, BackHandler, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Role = 'distributor' | 'retailer';
 type User = {
@@ -13,6 +14,7 @@ type User = {
   phone?: string;
   address?: string;
   currentBalance?: number;
+  distributorId?: string;
 };
 
 type Product = {
@@ -41,20 +43,16 @@ type Rate = {
   price: number;
 };
 
-const BASE_URL = 'http://[2602:ff16:13:104e::1]:4000';
-// const BASE_URL = Platform.OS === 'web'
-//   ? 'http://localhost:4000'
-//   : Platform.OS === 'ios'
-//     ? 'http://localhost:4000'
-//     : 'http://10.0.2.2:4000';
-
 export default function App() {
+  const [baseUrl, setBaseUrl] = useState('http://[2602:ff16:13:104e::1]:4000');
+  const [showSettings, setShowSettings] = useState(false);
+
   const [token, setToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [mode, setMode] = useState<'login' | 'signup' | 'admin' | 'user'>('login');
   const [adminTab, setAdminTab] = useState<'users' | 'stats' | 'products' | 'units'>('users');
-  const [distTab, setDistTab] = useState<'retailers' | 'products' | 'units' | 'rates' | 'profile'>('retailers');
+  const [distTab, setDistTab] = useState<'retailers' | 'products' | 'units' | 'rates' | 'profile' | 'reports'>('retailers');
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -98,6 +96,12 @@ export default function App() {
   const [newUnitFormalName, setNewUnitFormalName] = useState('');
   const [newUnitDecimals, setNewUnitDecimals] = useState('0');
 
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [txFilterType, setTxFilterType] = useState<string>('');
+  const [txFilterDateFrom, setTxFilterDateFrom] = useState('');
+  const [txFilterDateTo, setTxFilterDateTo] = useState('');
+  const [initialLoading, setInitialLoading] = useState(true);
+
   const bannerAnim = useMemo(() => new Animated.Value(0), []);
   useEffect(() => {
     Animated.loop(
@@ -109,12 +113,57 @@ export default function App() {
   }, [bannerAnim]);
   const bannerBg = bannerAnim.interpolate({ inputRange: [0, 1], outputRange: ['#f0f5ff', '#ffe4e6'] });
 
-  const listUrl = useMemo(() => `${BASE_URL}/api/users`, []);
+  const listUrl = useMemo(() => `${baseUrl}/api/users`, [baseUrl]);
+
+  useEffect(() => {
+    AsyncStorage.getItem('token').then(t => {
+      if (t) {
+        setToken(t);
+        // Verify token
+        fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${t}` } })
+          .then(res => {
+            if (res.ok) return res.json();
+            throw new Error('Invalid token');
+          })
+          .then(user => {
+            setCurrentUser(user);
+            setMode(user.role === 'admin' ? 'admin' : 'user');
+          })
+          .catch(() => {
+            setToken(null);
+            AsyncStorage.removeItem('token');
+            setMode('login');
+          })
+          .finally(() => setInitialLoading(false));
+      } else {
+        setInitialLoading(false);
+      }
+    });
+  }, [baseUrl]);
+
+  useEffect(() => {
+    const backAction = () => {
+      if (editUser) { setEditUser(null); return true; }
+      if (editProductUnits) { setEditProductUnits(null); setSelectedUnitId(''); return true; }
+      if (showSettings) { setShowSettings(false); return true; }
+      if (mode === 'signup') { setMode('login'); return true; }
+
+      if (mode === 'login') return false;
+      
+      Alert.alert('Hold on!', 'Are you sure you want to exit?', [
+        { text: 'Cancel', onPress: () => null, style: 'cancel' },
+        { text: 'YES', onPress: () => BackHandler.exitApp() }
+      ]);
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [mode, editUser, editProductUnits, showSettings]);
 
   async function login() {
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail.trim().toLowerCase(), password: loginPassword }),
@@ -122,6 +171,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to login');
       setToken(data.token);
+      AsyncStorage.setItem('token', data.token);
       setCurrentUser(data.user);
       setMode(data.user.role === 'admin' ? 'admin' : 'user');
       setLoginEmail('');
@@ -134,7 +184,7 @@ export default function App() {
   async function signup() {
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/auth/signup`, {
+      const res = await fetch(`${baseUrl}/api/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: signupName.trim(), email: signupEmail.trim().toLowerCase(), password: signupPassword, role: signupRole }),
@@ -142,6 +192,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to signup');
       setToken(data.token);
+      AsyncStorage.setItem('token', data.token);
       setCurrentUser(data.user);
       setMode('user');
       setSignupName('');
@@ -181,7 +232,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/admin/stats`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/admin/stats`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load stats');
       setStats(data);
@@ -207,7 +258,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/products`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/products`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load products');
       setProducts(data as Product[]);
@@ -228,7 +279,7 @@ export default function App() {
     try {
       const nameEnglish = productName.trim();
       if (!nameEnglish) throw new Error('Name is required');
-      const res = await fetch(`${BASE_URL}/api/products`, {
+      const res = await fetch(`${baseUrl}/api/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ nameEnglish }),
@@ -250,7 +301,7 @@ export default function App() {
       const params = new URLSearchParams();
       if (unitFilterType !== 'all') params.set('type', unitFilterType);
       if (unitSymbolQuery.trim()) params.set('symbol', unitSymbolQuery.trim());
-      const res = await fetch(`${BASE_URL}/api/units?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/units?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
       const ctype = res.headers.get('content-type') || '';
       const body = await res.text();
       const isJson = ctype.includes('application/json');
@@ -273,7 +324,7 @@ export default function App() {
       if (!symbol) throw new Error('Unit symbol required');
       const formalName = newUnitFormalName.trim();
       const decimalPlaces = Number(newUnitDecimals) || 0;
-      const res = await fetch(`${BASE_URL}/api/units`, {
+      const res = await fetch(`${baseUrl}/api/units`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ type: newUnitType, symbol, formalName, decimalPlaces }),
@@ -301,7 +352,7 @@ export default function App() {
     if (!token || !editProductUnits) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/products/${editProductUnits._id}`, {
+      const res = await fetch(`${baseUrl}/api/products/${editProductUnits._id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ unit: selectedUnitId || null }),
@@ -321,7 +372,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/my/retailers`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/my/retailers`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load retailers');
       setRetailers(data as User[]);
@@ -341,7 +392,7 @@ export default function App() {
       const phone = retPhone.trim();
       const address = retAddress.trim();
       const currentBalance = Number(retBalance) || 0;
-      const res = await fetch(`${BASE_URL}/api/my/retailers`, {
+      const res = await fetch(`${baseUrl}/api/my/retailers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name, phone, address, currentBalance }),
@@ -362,7 +413,7 @@ export default function App() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/my/retailers/${r._id}/status`, {
+      const res = await fetch(`${baseUrl}/api/my/retailers/${r._id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ active: !r.active }),
@@ -379,7 +430,7 @@ export default function App() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/my/retailers/${r._id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/my/retailers/${r._id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to delete retailer');
       await loadMyRetailers();
@@ -393,7 +444,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/my/rates`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${baseUrl}/api/my/rates`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load rates');
       setRates(data as Rate[]);
@@ -414,7 +465,7 @@ export default function App() {
       const priceStr = rateMap[productId] || '';
       const price = Number(priceStr);
       if (!Number.isFinite(price)) throw new Error('Enter valid price');
-      const res = await fetch(`${BASE_URL}/api/my/rates`, {
+      const res = await fetch(`${baseUrl}/api/my/rates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ productId, price }),
@@ -427,11 +478,36 @@ export default function App() {
     }
   }
 
+  async function loadRetailerTransactions() {
+    if (!token || !currentUser || currentUser.role !== 'retailer') return;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (txFilterType) params.append('type', txFilterType);
+      if (txFilterDateFrom) params.append('from', txFilterDateFrom);
+      if (txFilterDateTo) params.append('to', txFilterDateTo);
+
+      const res = await fetch(`${baseUrl}/api/retailer/transactions?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load transactions');
+      setTransactions(data);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load transactions');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (currentUser?.role === 'retailer' && distTab === 'reports') loadRetailerTransactions();
+  }, [currentUser, distTab]);
+
   async function adminCreateUser() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/users`, {
+      const res = await fetch(`${baseUrl}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: adminNewName.trim(), email: adminNewEmail.trim().toLowerCase(), role: adminNewRole, password: adminNewPassword }),
@@ -451,7 +527,7 @@ export default function App() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${u._id}/status`, {
+      const res = await fetch(`${baseUrl}/api/users/${u._id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ active: !u.active }),
@@ -468,7 +544,7 @@ export default function App() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${u._id}`, {
+      const res = await fetch(`${baseUrl}/api/users/${u._id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -484,10 +560,17 @@ export default function App() {
     if (!token || !editUser) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/users/${editUser._id}/profile`, {
+      const res = await fetch(`${baseUrl}/api/admin/users/${editUser._id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: editUser.name, phone: editUser.phone, address: editUser.address, role: editUser.role, active: editUser.active }),
+        body: JSON.stringify({
+          name: editUser.name,
+          phone: editUser.phone,
+          address: editUser.address,
+          role: editUser.role,
+          active: editUser.active,
+          distributorId: editUser.distributorId
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update');
@@ -500,7 +583,7 @@ export default function App() {
 
   async function refreshMe() {
     if (!token) return;
-    const res = await fetch(`${BASE_URL}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     if (res.ok) setCurrentUser(data as User);
   }
@@ -509,7 +592,7 @@ export default function App() {
     if (!token) return;
     setError(null);
     try {
-      const res = await fetch(`${BASE_URL}/api/me/profile`, {
+      const res = await fetch(`${baseUrl}/api/me/profile`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: next.name, phone: next.phone, address: next.address }),
@@ -528,168 +611,236 @@ export default function App() {
     setMode('login');
   }
 
-  if (mode === 'login') {
+  if (initialLoading) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Login</Text>
-        <View style={styles.formCol}>
-          <TextInput placeholder="Email" value={loginEmail} onChangeText={setLoginEmail} autoCapitalize="none" style={styles.input} />
-          <TextInput placeholder="Password" value={loginPassword} onChangeText={setLoginPassword} secureTextEntry style={styles.input} />
-          <Pressable onPress={login} style={styles.primaryBtn}><Text style={styles.primaryText}>Login</Text></Pressable>
-          <Pressable onPress={() => setMode('signup')} style={styles.linkBtn}><Text style={styles.linkText}>Create an account</Text></Pressable>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </View>
+      <View style={[styles.container, styles.centerContent]}>
+        <Text>Loading...</Text>
         <StatusBar style="auto" />
       </View>
+    );
+  }
+
+  if (mode === 'login') {
+    return (
+      <ScrollView contentContainerStyle={[styles.container, styles.centerContent]} style={{flex: 1, backgroundColor: '#f0f5ff'}}>
+        <Text style={styles.title}>Amul Distributor</Text>
+        <View style={styles.card}>
+          <Text style={[styles.title, { fontSize: 24, marginBottom: 16 }]}>Login</Text>
+          <View style={styles.formCol}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput placeholder="Enter email" value={loginEmail} onChangeText={setLoginEmail} autoCapitalize="none" style={styles.input} placeholderTextColor="#94a3b8" />
+            <Text style={styles.label}>Password</Text>
+            <TextInput placeholder="Enter password" value={loginPassword} onChangeText={setLoginPassword} secureTextEntry style={styles.input} placeholderTextColor="#94a3b8" />
+            <Pressable onPress={login} style={styles.primaryBtn}><Text style={styles.primaryText}>Login</Text></Pressable>
+            <Pressable onPress={() => setMode('signup')} style={styles.linkBtn}><Text style={styles.linkText}>Create an account</Text></Pressable>
+          </View>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+        </View>
+
+        <Pressable onPress={() => setShowSettings(!showSettings)} style={{ marginTop: 20, alignSelf: 'center' }}>
+          <Text style={{ color: '#64748b' }}>Server Settings</Text>
+        </Pressable>
+
+        {showSettings && (
+          <View style={[styles.card, { marginTop: 10 }]}>
+            <Text style={styles.label}>Server URL</Text>
+            <TextInput value={baseUrl} onChangeText={setBaseUrl} style={styles.input} autoCapitalize="none" />
+          </View>
+        )}
+        <StatusBar style="auto" />
+      </ScrollView>
     );
   }
 
   if (mode === 'signup') {
     return (
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={[styles.container, styles.centerContent]} style={{flex: 1, backgroundColor: '#f0f5ff'}}>
         <Text style={styles.title}>Sign Up</Text>
-        <View style={styles.formCol}>
-          <TextInput placeholder="Name" value={signupName} onChangeText={setSignupName} style={styles.input} />
-          <TextInput placeholder="Email" value={signupEmail} onChangeText={setSignupEmail} autoCapitalize="none" style={styles.input} />
-          <TextInput placeholder="Password" value={signupPassword} onChangeText={setSignupPassword} secureTextEntry style={styles.input} />
-          <View style={styles.roleRow}>
-            <Pressable onPress={() => setSignupRole('distributor')} style={[styles.roleBtn, signupRole === 'distributor' && styles.roleBtnActive]}>
-              <Text style={styles.roleText}>Distributor</Text>
-            </Pressable>
-            <Pressable onPress={() => setSignupRole('retailer')} style={[styles.roleBtn, signupRole === 'retailer' && styles.roleBtnActive]}>
-              <Text style={styles.roleText}>Retailer</Text>
-            </Pressable>
+        <View style={styles.card}>
+          <View style={styles.formCol}>
+            <TextInput placeholder="Full Name" value={signupName} onChangeText={setSignupName} style={styles.input} placeholderTextColor="#94a3b8" />
+            <TextInput placeholder="Email" value={signupEmail} onChangeText={setSignupEmail} autoCapitalize="none" style={styles.input} placeholderTextColor="#94a3b8" />
+            <TextInput placeholder="Password" value={signupPassword} onChangeText={setSignupPassword} secureTextEntry style={styles.input} placeholderTextColor="#94a3b8" />
+            <Text style={{ marginBottom: 4, fontWeight: '600', color: '#333' }}>I am a:</Text>
+            <View style={styles.roleRow}>
+              <Pressable onPress={() => setSignupRole('distributor')} style={[styles.roleBtn, signupRole === 'distributor' && styles.roleBtnActive]}>
+                <Text style={styles.roleText}>Distributor</Text>
+              </Pressable>
+              <Pressable onPress={() => setSignupRole('retailer')} style={[styles.roleBtn, signupRole === 'retailer' && styles.roleBtnActive]}>
+                <Text style={styles.roleText}>Retailer</Text>
+              </Pressable>
+            </View>
+            <Pressable onPress={signup} style={styles.primaryBtn}><Text style={styles.primaryText}>Sign Up</Text></Pressable>
+            <Pressable onPress={() => setMode('login')} style={styles.linkBtn}><Text style={styles.linkText}>Already have an account?</Text></Pressable>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
           </View>
-          <Pressable onPress={signup} style={styles.primaryBtn}><Text style={styles.primaryText}>Create Account</Text></Pressable>
-          <Pressable onPress={() => setMode('login')} style={styles.linkBtn}><Text style={styles.linkText}>Back to Login</Text></Pressable>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
         </View>
         <StatusBar style="auto" />
-      </View>
+      </ScrollView>
     );
   }
 
-  if (mode === 'user' && currentUser) {
-    if (currentUser.role !== 'distributor') {
-      return (
-        <View style={styles.container}>
-          <Text style={styles.title}>Profile</Text>
-          <View style={styles.formCol}>
-            <TextInput placeholder="Name" value={currentUser.name} onChangeText={(t) => setCurrentUser({ ...currentUser, name: t })} editable={!currentUser.profileEditedOnce} style={styles.input} />
-            <TextInput placeholder="Phone" value={currentUser.phone || ''} onChangeText={(t) => setCurrentUser({ ...currentUser, phone: t })} editable={!currentUser.profileEditedOnce} style={styles.input} />
-            <TextInput placeholder="Address" value={currentUser.address || ''} onChangeText={(t) => setCurrentUser({ ...currentUser, address: t })} editable={!currentUser.profileEditedOnce} style={styles.input} />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => updateMyProfile(currentUser)} disabled={!!currentUser.profileEditedOnce} style={[styles.primaryBtn, currentUser.profileEditedOnce && styles.disabledBtn]}>
-                <Text style={styles.primaryText}>{currentUser.profileEditedOnce ? 'Profile Locked' : 'Save Profile'}</Text>
-              </Pressable>
-              <Pressable onPress={refreshMe} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Refresh</Text></Pressable>
-              <Pressable onPress={logout} style={styles.linkBtn}><Text style={styles.linkText}>Logout</Text></Pressable>
-            </View>
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-          </View>
-          <StatusBar style="auto" />
-        </View>
-      );
-    }
-
-    useEffect(() => {
-      if (distTab === 'retailers') loadMyRetailers();
-      if (distTab === 'products') loadProducts();
-      if (distTab === 'units') loadUnits();
-      if (distTab === 'rates') { loadProducts(); loadRates(); }
-    }, [distTab, token]);
-
+  if (mode === 'admin') {
     return (
-    <View style={styles.container}>
-      <Animated.View style={[styles.hero, { backgroundColor: bannerBg }]}> 
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Image source={require('./assets/icon.png')} style={styles.heroIcon} />
-            <Text style={styles.heroTitle}>Distributor Dashboard</Text>
-          </View>
-          <Pressable onPress={logout} style={styles.linkBtn}><Text style={styles.linkText}>Logout</Text></Pressable>
+      <View style={styles.container}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={styles.title}>Admin Panel</Text>
+          <Pressable onPress={logout} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Logout</Text></Pressable>
         </View>
-      </Animated.View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-        <Pressable onPress={() => setDistTab('retailers')} style={[styles.tabBtn, distTab === 'retailers' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Retailers</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setDistTab('products')} style={[styles.tabBtn, distTab === 'products' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
+        <ScrollView horizontal style={styles.tabScroll} showsHorizontalScrollIndicator={false}>
+          <Pressable onPress={() => setAdminTab('users')} style={[styles.tabBtn, adminTab === 'users' && styles.tabBtnActive]}>
+            <Text style={styles.tabText}>Users</Text>
+          </Pressable>
+          <Pressable onPress={() => setAdminTab('stats')} style={[styles.tabBtn, adminTab === 'stats' && styles.tabBtnActive]}>
+            <Text style={styles.tabText}>Stats</Text>
+          </Pressable>
+          <Pressable onPress={() => setAdminTab('products')} style={[styles.tabBtn, adminTab === 'products' && styles.tabBtnActive]}>
             <Text style={styles.tabText}>Products</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setDistTab('units')} style={[styles.tabBtn, distTab === 'units' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
+          </Pressable>
+          <Pressable onPress={() => setAdminTab('units')} style={[styles.tabBtn, adminTab === 'units' && styles.tabBtnActive]}>
             <Text style={styles.tabText}>Units</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setDistTab('rates')} style={[styles.tabBtn, distTab === 'rates' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Rates</Text>
-          </View>
-        </Pressable>
-      </ScrollView>
+          </Pressable>
+        </ScrollView>
 
-        {distTab === 'retailers' && (
+        {adminTab === 'users' && (
           <View>
-            <View style={styles.formCol}>
-              <TextInput placeholder="Retailer name" value={retName} onChangeText={setRetName} style={styles.input} />
-              <TextInput placeholder="Phone" value={retPhone} onChangeText={setRetPhone} style={styles.input} />
-              <TextInput placeholder="Address" value={retAddress} onChangeText={setRetAddress} style={styles.input} />
-              <TextInput placeholder="Opening balance" value={retBalance} onChangeText={setRetBalance} keyboardType="numeric" style={styles.input} />
-              <Pressable onPress={createMyRetailer} style={styles.createBtn}><Text style={styles.createText}>Add Retailer</Text></Pressable>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Create New User</Text>
+              <View style={styles.formCol}>
+                <TextInput placeholder="Name" value={adminNewName} onChangeText={setAdminNewName} style={styles.input} />
+                <TextInput placeholder="Email" value={adminNewEmail} onChangeText={setAdminNewEmail} autoCapitalize="none" style={styles.input} />
+                <TextInput placeholder="Password" value={adminNewPassword} onChangeText={setAdminNewPassword} style={styles.input} />
+                <View style={styles.roleRow}>
+                  <Pressable onPress={() => setAdminNewRole('distributor')} style={[styles.roleBtn, adminNewRole === 'distributor' && styles.roleBtnActive]}>
+                    <Text style={styles.roleText}>Distributor</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setAdminNewRole('retailer')} style={[styles.roleBtn, adminNewRole === 'retailer' && styles.roleBtnActive]}>
+                    <Text style={styles.roleText}>Retailer</Text>
+                  </Pressable>
+                </View>
+                <Pressable onPress={adminCreateUser} style={styles.createBtn}><Text style={styles.createText}>Create User</Text></Pressable>
+              </View>
             </View>
+
+            <View style={{ marginVertical: 12 }}>
+              <Text style={{ fontWeight: '600', marginBottom: 8 }}>Filter Users:</Text>
+              <View style={styles.roleRow}>
+                <Pressable onPress={() => setFilterRole('all')} style={[styles.roleBtn, filterRole === 'all' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>All</Text>
+                </Pressable>
+                <Pressable onPress={() => setFilterRole('distributor')} style={[styles.roleBtn, filterRole === 'distributor' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>Distributor</Text>
+                </Pressable>
+                <Pressable onPress={() => setFilterRole('retailer')} style={[styles.roleBtn, filterRole === 'retailer' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>Retailer</Text>
+                </Pressable>
+              </View>
+              <View style={styles.roleRow}>
+                <Pressable onPress={() => setFilterActive('all')} style={[styles.roleBtn, filterActive === 'all' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>All</Text>
+                </Pressable>
+                <Pressable onPress={() => setFilterActive('active')} style={[styles.roleBtn, filterActive === 'active' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>Active</Text>
+                </Pressable>
+                <Pressable onPress={() => setFilterActive('inactive')} style={[styles.roleBtn, filterActive === 'inactive' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>Inactive</Text>
+                </Pressable>
+              </View>
+            </View>
+
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {loading ? <Text>Loading...</Text> : null}
+
             <FlatList
-              data={retailers}
+              data={users}
               keyExtractor={(item) => item._id}
               contentContainerStyle={styles.list}
-              ListEmptyComponent={<Text style={styles.empty}>No retailers</Text>}
+              ListEmptyComponent={<Text style={styles.empty}>No users yet</Text>}
               renderItem={({ item }) => (
                 <View style={styles.card}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>{item.name}</Text>
                     <Text style={styles.cardSubtitle}>{item.email}</Text>
-                    <Text style={styles.cardSubtitle}>{item.phone || ''}</Text>
+                    <Text style={styles.badge}>{item.role}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <Pressable onPress={() => toggleRetailerActive(item)} style={[styles.toggleBtn, item.active ? styles.activeOn : styles.activeOff]}>
+                    <Pressable onPress={() => setEditUser(item)} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Edit</Text></Pressable>
+                    <Pressable onPress={() => adminToggleActive(item)} style={[styles.toggleBtn, item.active ? styles.activeOn : styles.activeOff]}>
                       <Text style={styles.toggleText}>{item.active ? 'Active' : 'Inactive'}</Text>
                     </Pressable>
-                    <Pressable onPress={() => deleteMyRetailer(item)} style={styles.dangerBtn}><Text style={styles.dangerText}>Delete</Text></Pressable>
+                    <Pressable onPress={() => adminDeleteUser(item)} style={styles.dangerBtn}><Text style={styles.dangerText}>Delete</Text></Pressable>
                   </View>
                 </View>
               )}
             />
-            {(() => {
-              const totals = retailers.map((r) => r.currentBalance || 0);
-              const max = Math.max(1, ...totals);
-              const top = retailers.slice().sort((a, b) => (b.currentBalance || 0) - (a.currentBalance || 0)).slice(0, 5);
-              return (
-                <View style={styles.chartBox}>
-                  {top.map((r) => (
-                    <View key={r._id} style={styles.chartRow}>
-                      <Text style={styles.chartLabel}>{r.name}</Text>
-                      <View style={[styles.chartBar, { width: `${Math.round(((r.currentBalance || 0) / max) * 100)}%`, backgroundColor: '#0ea5e9' }]} />
-                      <Text style={styles.chartValue}>{(r.currentBalance || 0).toFixed(0)}</Text>
-                    </View>
-                  ))}
+            {editUser && (
+              <View style={styles.modal}>
+                <View style={styles.modalCard}>
+                  <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Edit User</Text>
+                  <TextInput placeholder="Name" value={editUser.name} onChangeText={(t) => setEditUser({ ...editUser, name: t })} style={styles.input} />
+                  <TextInput placeholder="Phone" value={editUser.phone || ''} onChangeText={(t) => setEditUser({ ...editUser, phone: t })} style={styles.input} />
+                  <TextInput placeholder="Address" value={editUser.address || ''} onChangeText={(t) => setEditUser({ ...editUser, address: t })} style={styles.input} />
+                  {editUser.role === 'retailer' && (
+                    <TextInput placeholder="Distributor ID" value={editUser.distributorId || ''} onChangeText={(t) => setEditUser({ ...editUser, distributorId: t })} style={styles.input} />
+                  )}
+                  <View style={styles.roleRow}>
+                    <Pressable onPress={() => setEditUser({ ...editUser, role: 'distributor' })} style={[styles.roleBtn, editUser.role === 'distributor' && styles.roleBtnActive]}>
+                      <Text style={styles.roleText}>Distributor</Text>
+                    </Pressable>
+                    <Pressable onPress={() => setEditUser({ ...editUser, role: 'retailer' })} style={[styles.roleBtn, editUser.role === 'retailer' && styles.roleBtnActive]}>
+                      <Text style={styles.roleText}>Retailer</Text>
+                    </Pressable>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <Pressable onPress={adminSaveEdit} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
+                    <Pressable onPress={() => setEditUser(null)} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
+                  </View>
                 </View>
-              );
-            })()}
+              </View>
+            )}
           </View>
         )}
 
-        {distTab === 'products' && (
+        {adminTab === 'stats' && (
+          <View>
+            {loading ? <Text>Loading...</Text> : null}
+            {stats && (
+              <View style={styles.statsCard}>
+                <Text style={styles.statLine}>Total: {stats.total}</Text>
+                <Text style={styles.statLine}>Admins: {stats.admins}</Text>
+                <Text style={styles.statLine}>Distributors: {stats.distributors}</Text>
+                <Text style={styles.statLine}>Retailers: {stats.retailers}</Text>
+                <Text style={styles.statLine}>Active: {stats.active} | Inactive: {stats.inactive}</Text>
+                <Text style={[styles.statLine, { marginTop: 8 }]}>Recent:</Text>
+                {stats.recent.map((u) => (
+                  <Text key={u._id} style={styles.statItem}>{u.name} • {u.email} • {u.role}</Text>
+                ))}
+                <View style={styles.chartBox}>
+                  {(() => {
+                    const maxVal = Math.max(stats.total, stats.admins, stats.distributors, stats.retailers, (stats as any).products || 0);
+                    const rows = [
+                      { label: 'Total', value: stats.total, color: '#7c3aed' },
+                      { label: 'Admins', value: stats.admins, color: '#ef4444' },
+                      { label: 'Distributors', value: stats.distributors, color: '#16a34a' },
+                      { label: 'Retailers', value: stats.retailers, color: '#f59e0b' },
+                      { label: 'Products', value: (stats as any).products || 0, color: '#0ea5e9' },
+                    ];
+                    return rows.map((r) => (
+                      <View key={r.label} style={styles.chartRow}>
+                        <Text style={styles.chartLabel}>{r.label}</Text>
+                        <View style={[styles.chartBar, { width: `${maxVal ? Math.round((r.value / maxVal) * 100) : 0}%`, backgroundColor: r.color }]} />
+                        <Text style={styles.chartValue}>{r.value}</Text>
+                      </View>
+                    ));
+                  })()}
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {adminTab === 'products' && (
           <View>
             <View style={styles.formRow}>
               <TextInput placeholder="Product name (English)" value={productName} onChangeText={setProductName} style={styles.input} />
@@ -701,16 +852,20 @@ export default function App() {
               data={products}
               keyExtractor={(item) => item._id}
               contentContainerStyle={styles.list}
-              ListEmptyComponent={<Text style={styles.empty}>No products</Text>}
+              ListEmptyComponent={<Text style={styles.empty}>No products yet</Text>}
               renderItem={({ item }) => (
                 <View style={styles.card}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.cardTitle}>{item.nameEnglish}</Text>
                     <Text style={styles.cardSubtitle}>{item.nameHindi}</Text>
                     <Text style={styles.cardSubtitle}>
-                      {item.unit
-                        ? `Unit: ${(units.find((x) => x._id === item.unit)?.symbol || item.unit)}`
-                        : 'Unit: none'}
+                      {(() => {
+                        const u = item.unit;
+                        if (!u) return 'Unit: none';
+                        if (typeof u === 'object') return `Unit: ${u.symbol}`;
+                        const found = units.find((x) => x._id === u);
+                        return `Unit: ${found ? found.symbol : u}`;
+                      })()}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -718,7 +873,8 @@ export default function App() {
                     <Pressable
                       onPress={async () => {
                         setEditProductUnits(item);
-                        setSelectedUnitId(item.unit || '');
+                        const uId = typeof item.unit === 'object' ? item.unit._id : item.unit;
+                        setSelectedUnitId(uId || '');
                         if (units.length === 0) await loadUnits();
                       }}
                       style={styles.secondaryBtn}
@@ -729,24 +885,114 @@ export default function App() {
                 </View>
               )}
             />
+            {Platform.OS === 'web' ? (
+              editProductUnits && (
+                <View style={styles.modal}>
+                  <View style={styles.modalCard}>
+                    <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Select Unit</Text>
+                    <View style={{ maxHeight: 300 }}>
+                      <FlatList
+                        data={units}
+                        keyExtractor={(u) => u._id}
+                        renderItem={({ item: u }) => (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+                            <Pressable
+                              onPress={() => toggleUnitSelection(u._id)}
+                              style={[styles.roleBtn, selectedUnitId === u._id && styles.roleBtnActive]}
+                            >
+                              <Text style={styles.roleText}>{selectedUnitId === u._id ? '✓' : ''}</Text>
+                            </Pressable>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.cardTitle}>{u.symbol}</Text>
+                              <Text style={styles.cardSubtitle}>{u.formalName || ''}</Text>
+                              <Text style={styles.cardSubtitle}>Type: {u.type} • Decimals: {u.decimalPlaces ?? 0}</Text>
+                              {u.type === 'Compound' && (
+                                <Text style={styles.cardSubtitle}>
+                                  {(units.find((x) => x._id === (u.firstUnit || ''))?.symbol || u.firstUnit || '')}
+                                  {' → '}
+                                  {(units.find((x) => x._id === (u.secondUnit || ''))?.symbol || u.secondUnit || '')}
+                                  {' × '}
+                                  {u.conversionFactor ?? ''}
+                                </Text>
+                              )}
+                            </View>
+                            <Text style={styles.badge}>{u.type}</Text>
+                          </View>
+                        )}
+                      />
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <Pressable onPress={saveUnitsForProduct} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
+                      <Pressable onPress={() => { setEditProductUnits(null); setSelectedUnitId(''); }} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
+                    </View>
+                  </View>
+                </View>
+              )
+            ) : (
+              <Modal visible={!!editProductUnits} transparent animationType="fade" onRequestClose={() => { setEditProductUnits(null); setSelectedUnitId(''); }}>
+                <View style={styles.modal}>
+                  <View style={styles.modalCard}>
+                    <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Select Unit</Text>
+                    <View style={{ maxHeight: 300 }}>
+                      <FlatList
+                        data={units}
+                        keyExtractor={(u) => u._id}
+                        renderItem={({ item: u }) => (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+                            <Pressable
+                              onPress={() => toggleUnitSelection(u._id)}
+                              style={[styles.roleBtn, selectedUnitId === u._id && styles.roleBtnActive]}
+                            >
+                              <Text style={styles.roleText}>{selectedUnitId === u._id ? '✓' : ''}</Text>
+                            </Pressable>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.cardTitle}>{u.symbol}</Text>
+                              <Text style={styles.cardSubtitle}>{u.formalName || ''}</Text>
+                              <Text style={styles.cardSubtitle}>Type: {u.type} • Decimals: {u.decimalPlaces ?? 0}</Text>
+                              {u.type === 'Compound' && (
+                                <Text style={styles.cardSubtitle}>
+                                  {(units.find((x) => x._id === (u.firstUnit || ''))?.symbol || u.firstUnit || '')}
+                                  {' → '}
+                                  {(units.find((x) => x._id === (u.secondUnit || ''))?.symbol || u.secondUnit || '')}
+                                  {' × '}
+                                  {u.conversionFactor ?? ''}
+                                </Text>
+                              )}
+                            </View>
+                            <Text style={styles.badge}>{u.type}</Text>
+                          </View>
+                        )}
+                      />
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <Pressable onPress={saveUnitsForProduct} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
+                      <Pressable onPress={() => { setEditProductUnits(null); setSelectedUnitId(''); }} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
+                    </View>
+                  </View>
+                </View>
+              </Modal>
+            )}
           </View>
         )}
 
-        {distTab === 'units' && (
+        {adminTab === 'units' && (
           <View>
-            <View style={styles.formCol}>
+            <View style={styles.formRow}>
               <View style={styles.roleRow}>
-                <Pressable onPress={() => setNewUnitType('Simple')} style={[styles.roleBtn, newUnitType === 'Simple' && styles.roleBtnActive]}>
+                <Pressable onPress={() => setUnitFilterType('all')} style={[styles.roleBtn, unitFilterType === 'all' && styles.roleBtnActive]}>
+                  <Text style={styles.roleText}>All</Text>
+                </Pressable>
+                <Pressable onPress={() => setUnitFilterType('Simple')} style={[styles.roleBtn, unitFilterType === 'Simple' && styles.roleBtnActive]}>
                   <Text style={styles.roleText}>Simple</Text>
                 </Pressable>
-                <Pressable onPress={() => setNewUnitType('Compound')} style={[styles.roleBtn, newUnitType === 'Compound' && styles.roleBtnActive]}>
+                <Pressable onPress={() => setUnitFilterType('Compound')} style={[styles.roleBtn, unitFilterType === 'Compound' && styles.roleBtnActive]}>
                   <Text style={styles.roleText}>Compound</Text>
                 </Pressable>
               </View>
-              <TextInput placeholder="Symbol" value={newUnitSymbol} onChangeText={setNewUnitSymbol} style={styles.input} />
-              <TextInput placeholder="Formal name" value={newUnitFormalName} onChangeText={setNewUnitFormalName} style={styles.input} />
-              <TextInput placeholder="Decimal places" value={newUnitDecimals} onChangeText={setNewUnitDecimals} keyboardType="numeric" style={styles.input} />
-              <Pressable onPress={createUnit} style={styles.createBtn}><Text style={styles.createText}>Add Unit</Text></Pressable>
+            </View>
+            <View style={styles.formRow}>
+              <TextInput placeholder="Search symbol" value={unitSymbolQuery} onChangeText={setUnitSymbolQuery} style={styles.input} />
+              <Pressable onPress={loadUnits} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Search</Text></Pressable>
             </View>
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {loading ? <Text>Loading...</Text> : null}
@@ -783,46 +1029,158 @@ export default function App() {
           </View>
         )}
 
-        {distTab === 'rates' && (
-          <ScrollView contentContainerStyle={styles.list}>
-            {products.map((p) => (
-              <View key={p._id} style={styles.card}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{p.nameEnglish}</Text>
-                  <Text style={styles.cardSubtitle}>{p.nameHindi}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                  <TextInput
-                    placeholder="Price"
-                    value={rateMap[p._id] || ''}
-                    onChangeText={(t) => setRateMap((prev) => ({ ...prev, [p._id]: t }))}
-                    keyboardType="numeric"
-                    style={[styles.input, { width: 100 }]}
-                  />
-                  <Pressable onPress={() => setRate(p._id)} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Save</Text></Pressable>
-                </View>
-              </View>
-            ))}
-            {(() => {
-              const setCount = rates.length;
-              const totalCount = products.length;
-              const max = Math.max(setCount, totalCount);
-              return (
-                <View style={styles.chartBox}>
-                  <View style={styles.chartRow}>
-                    <Text style={styles.chartLabel}>Rates Set</Text>
-                    <View style={[styles.chartBar, { width: `${max ? Math.round((setCount / max) * 100) : 0}%`, backgroundColor: '#16a34a' }]} />
-                    <Text style={styles.chartValue}>{setCount}</Text>
-                  </View>
-                  <View style={styles.chartRow}>
-                    <Text style={styles.chartLabel}>Products</Text>
-                    <View style={[styles.chartBar, { width: `${max ? Math.round((totalCount / max) * 100) : 0}%`, backgroundColor: '#7c3aed' }]} />
-                    <Text style={styles.chartValue}>{totalCount}</Text>
-                  </View>
-                </View>
-              );
-            })()}
+        <StatusBar style="auto" />
+      </View>
+    );
+  }
+
+  // User/Distributor Mode
+  if (mode === 'user') {
+    return (
+      <View style={styles.container}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={styles.title}>Welcome, {currentUser?.name}</Text>
+          <Pressable onPress={logout} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Logout</Text></Pressable>
+        </View>
+
+        {currentUser?.role === 'distributor' && (
+          <ScrollView horizontal style={styles.tabScroll} showsHorizontalScrollIndicator={false}>
+            <Pressable onPress={() => setDistTab('retailers')} style={[styles.tabBtn, distTab === 'retailers' && styles.tabBtnActive]}>
+              <Text style={styles.tabText}>Retailers</Text>
+            </Pressable>
+            <Pressable onPress={() => setDistTab('products')} style={[styles.tabBtn, distTab === 'products' && styles.tabBtnActive]}>
+              <Text style={styles.tabText}>Products</Text>
+            </Pressable>
+            <Pressable onPress={() => setDistTab('units')} style={[styles.tabBtn, distTab === 'units' && styles.tabBtnActive]}>
+              <Text style={styles.tabText}>Units</Text>
+            </Pressable>
+            <Pressable onPress={() => setDistTab('rates')} style={[styles.tabBtn, distTab === 'rates' && styles.tabBtnActive]}>
+              <Text style={styles.tabText}>Rates</Text>
+            </Pressable>
+            <Pressable onPress={() => setDistTab('profile')} style={[styles.tabBtn, distTab === 'profile' && styles.tabBtnActive]}>
+              <Text style={styles.tabText}>Profile</Text>
+            </Pressable>
           </ScrollView>
+        )}
+
+        {currentUser?.role === 'retailer' && (
+          <View>
+            <ScrollView horizontal style={styles.tabScroll} showsHorizontalScrollIndicator={false}>
+              <Pressable onPress={() => setDistTab('profile')} style={[styles.tabBtn, distTab === 'profile' && styles.tabBtnActive]}>
+                <Text style={styles.tabText}>Profile</Text>
+              </Pressable>
+              <Pressable onPress={() => setDistTab('reports')} style={[styles.tabBtn, distTab === 'reports' && styles.tabBtnActive]}>
+                <Text style={styles.tabText}>Reports</Text>
+              </Pressable>
+            </ScrollView>
+            
+            {distTab === 'reports' && (
+                <View style={{flex: 1}}>
+                    <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                        <Text style={styles.cardTitle}>Transaction History</Text>
+                        <Pressable onPress={loadRetailerTransactions} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Refresh</Text></Pressable>
+                    </View>
+                    <View style={{ marginBottom: 12 }}>
+                        <TextInput placeholder="Filter Type (e.g. payment_cash)" value={txFilterType} onChangeText={setTxFilterType} style={[styles.input, { marginBottom: 8 }]} />
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TextInput placeholder="From (YYYY-MM-DD)" value={txFilterDateFrom} onChangeText={setTxFilterDateFrom} style={[styles.input, { flex: 1, marginBottom: 0 }]} />
+                            <TextInput placeholder="To (YYYY-MM-DD)" value={txFilterDateTo} onChangeText={setTxFilterDateTo} style={[styles.input, { flex: 1, marginBottom: 0 }]} />
+                        </View>
+                    </View>
+                    {loading ? <Text>Loading...</Text> : null}
+                    {error ? <Text style={styles.error}>{error}</Text> : null}
+                    <FlatList
+                        data={transactions}
+                        keyExtractor={(item) => item._id}
+                        contentContainerStyle={styles.list}
+                        ListEmptyComponent={<Text style={styles.empty}>No transactions found</Text>}
+                        renderItem={({ item }) => (
+                            <View style={styles.card}>
+                                <Text style={styles.cardTitle}>{item.type} - ₹{item.amount}</Text>
+                                <Text style={styles.cardSubtitle}>{new Date(item.createdAt).toLocaleString()}</Text>
+                                <Text style={styles.cardSubtitle}>{item.description || 'No description'}</Text>
+                            </View>
+                        )}
+                    />
+                </View>
+            )}
+          </View>
+        )}
+
+        {currentUser?.role === 'distributor' && distTab === 'retailers' && (
+          <View style={{flex: 1}}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Add Retailer</Text>
+              <View style={styles.formCol}>
+                <TextInput placeholder="Name" value={retName} onChangeText={setRetName} style={styles.input} />
+                <TextInput placeholder="Phone" value={retPhone} onChangeText={setRetPhone} style={styles.input} />
+                <TextInput placeholder="Address" value={retAddress} onChangeText={setRetAddress} style={styles.input} />
+                <TextInput placeholder="Initial Balance" value={retBalance} onChangeText={setRetBalance} keyboardType="numeric" style={styles.input} />
+                <Pressable onPress={createMyRetailer} style={styles.createBtn}><Text style={styles.createText}>Add</Text></Pressable>
+              </View>
+            </View>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {loading ? <Text>Loading...</Text> : null}
+            <FlatList
+              data={retailers}
+              keyExtractor={(item) => item._id}
+              contentContainerStyle={styles.list}
+              ListEmptyComponent={<Text style={styles.empty}>No retailers yet</Text>}
+              renderItem={({ item }) => (
+                <View style={styles.card}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardTitle}>{item.name}</Text>
+                    <Text style={styles.cardSubtitle}>{item.phone}</Text>
+                    <Text style={styles.cardSubtitle}>{item.address}</Text>
+                    <Text style={{ fontWeight: '600', color: '#16a34a' }}>Bal: ₹{item.currentBalance ?? 0}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable onPress={() => toggleRetailerActive(item)} style={[styles.toggleBtn, item.active ? styles.activeOn : styles.activeOff]}>
+                      <Text style={styles.toggleText}>{item.active ? 'Active' : 'Inactive'}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => deleteMyRetailer(item)} style={styles.dangerBtn}><Text style={styles.dangerText}>Delete</Text></Pressable>
+                  </View>
+                </View>
+              )}
+            />
+          </View>
+        )}
+
+        {/* Reuse Unit List for Distributor View */}
+        {currentUser?.role === 'distributor' && distTab === 'units' && (
+          <View style={{flex: 1}}>
+             {/* Same Unit List View as Admin */}
+             <View style={styles.formRow}>
+              <TextInput placeholder="Search symbol" value={unitSymbolQuery} onChangeText={setUnitSymbolQuery} style={styles.input} />
+              <Pressable onPress={loadUnits} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Search</Text></Pressable>
+            </View>
+            <FlatList
+              data={units}
+              keyExtractor={(item) => item._id}
+              contentContainerStyle={styles.list}
+              renderItem={({ item }) => (
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>{item.symbol}</Text>
+                  <Text style={styles.cardSubtitle}>{item.formalName}</Text>
+                </View>
+              )}
+            />
+          </View>
+        )}
+        
+        {/* Profile Tab */}
+        {distTab === 'profile' && (
+            <View style={styles.card}>
+                <Text style={styles.cardTitle}>My Profile</Text>
+                <View style={styles.formCol}>
+                    <Text style={styles.label}>Name</Text>
+                    <TextInput value={currentUser?.name} style={styles.input} editable={false} />
+                    <Text style={styles.label}>Email</Text>
+                    <TextInput value={currentUser?.email} style={styles.input} editable={false} />
+                    <Text style={styles.label}>Role</Text>
+                    <TextInput value={currentUser?.role} style={styles.input} editable={false} />
+                </View>
+            </View>
         )}
 
         <StatusBar style="auto" />
@@ -830,364 +1188,7 @@ export default function App() {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <Animated.View style={[styles.hero, { backgroundColor: bannerBg }]}> 
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Image source={require('./assets/icon.png')} style={styles.heroIcon} />
-            <Text style={styles.heroTitle}>Admin Dashboard</Text>
-          </View>
-          <Pressable onPress={logout} style={styles.linkBtn}><Text style={styles.linkText}>Logout</Text></Pressable>
-        </View>
-      </Animated.View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-        <Pressable onPress={() => setAdminTab('users')} style={[styles.tabBtn, adminTab === 'users' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Users</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setAdminTab('stats')} style={[styles.tabBtn, adminTab === 'stats' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Stats</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setAdminTab('products')} style={[styles.tabBtn, adminTab === 'products' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Products</Text>
-          </View>
-        </Pressable>
-        <Pressable onPress={() => setAdminTab('units')} style={[styles.tabBtn, adminTab === 'units' && styles.tabBtnActive]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Image source={require('./assets/icon.png')} style={styles.tabIcon} />
-            <Text style={styles.tabText}>Units</Text>
-          </View>
-        </Pressable>
-      </ScrollView>
-
-      {adminTab === 'users' && (
-      <View>
-      <View style={styles.formRow}>
-        <TextInput placeholder="Name" value={adminNewName} onChangeText={setAdminNewName} style={styles.input} />
-        <TextInput placeholder="Email" value={adminNewEmail} onChangeText={setAdminNewEmail} autoCapitalize="none" style={styles.input} />
-      </View>
-      <View style={styles.formRow}>
-        <TextInput placeholder="Password" value={adminNewPassword} onChangeText={setAdminNewPassword} secureTextEntry style={styles.input} />
-        <View style={styles.roleRow}>
-          <Pressable onPress={() => setAdminNewRole('distributor')} style={[styles.roleBtn, adminNewRole === 'distributor' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Distributor</Text>
-          </Pressable>
-          <Pressable onPress={() => setAdminNewRole('retailer')} style={[styles.roleBtn, adminNewRole === 'retailer' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Retailer</Text>
-          </Pressable>
-        </View>
-        <Pressable onPress={adminCreateUser} style={styles.createBtn}><Text style={styles.createText}>Create</Text></Pressable>
-      </View>
-
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-        <View style={styles.roleRow}>
-          <Pressable onPress={() => setFilterRole('all')} style={[styles.roleBtn, filterRole === 'all' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>All</Text>
-          </Pressable>
-          <Pressable onPress={() => setFilterRole('distributor')} style={[styles.roleBtn, filterRole === 'distributor' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Distributor</Text>
-          </Pressable>
-          <Pressable onPress={() => setFilterRole('retailer')} style={[styles.roleBtn, filterRole === 'retailer' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Retailer</Text>
-          </Pressable>
-        </View>
-        <View style={styles.roleRow}>
-          <Pressable onPress={() => setFilterActive('all')} style={[styles.roleBtn, filterActive === 'all' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>All</Text>
-          </Pressable>
-          <Pressable onPress={() => setFilterActive('active')} style={[styles.roleBtn, filterActive === 'active' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Active</Text>
-          </Pressable>
-          <Pressable onPress={() => setFilterActive('inactive')} style={[styles.roleBtn, filterActive === 'inactive' && styles.roleBtnActive]}>
-            <Text style={styles.roleText}>Inactive</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {loading ? <Text>Loading...</Text> : null}
-
-      <FlatList
-        data={users}
-        keyExtractor={(item) => item._id}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={<Text style={styles.empty}>No users yet</Text>}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{item.name}</Text>
-              <Text style={styles.cardSubtitle}>{item.email}</Text>
-              <Text style={styles.badge}>{item.role}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => setEditUser(item)} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Edit</Text></Pressable>
-              <Pressable onPress={() => adminToggleActive(item)} style={[styles.toggleBtn, item.active ? styles.activeOn : styles.activeOff]}>
-                <Text style={styles.toggleText}>{item.active ? 'Active' : 'Inactive'}</Text>
-              </Pressable>
-              <Pressable onPress={() => adminDeleteUser(item)} style={styles.dangerBtn}><Text style={styles.dangerText}>Delete</Text></Pressable>
-            </View>
-          </View>
-        )}
-      />
-      {editUser && (
-        <View style={styles.modal}>
-          <View style={styles.modalCard}>
-            <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Edit User</Text>
-            <TextInput placeholder="Name" value={editUser.name} onChangeText={(t) => setEditUser({ ...editUser, name: t })} style={styles.input} />
-            <TextInput placeholder="Phone" value={editUser.phone || ''} onChangeText={(t) => setEditUser({ ...editUser, phone: t })} style={styles.input} />
-            <TextInput placeholder="Address" value={editUser.address || ''} onChangeText={(t) => setEditUser({ ...editUser, address: t })} style={styles.input} />
-            <View style={styles.roleRow}>
-              <Pressable onPress={() => setEditUser({ ...editUser, role: 'distributor' })} style={[styles.roleBtn, editUser.role === 'distributor' && styles.roleBtnActive]}>
-                <Text style={styles.roleText}>Distributor</Text>
-              </Pressable>
-              <Pressable onPress={() => setEditUser({ ...editUser, role: 'retailer' })} style={[styles.roleBtn, editUser.role === 'retailer' && styles.roleBtnActive]}>
-                <Text style={styles.roleText}>Retailer</Text>
-              </Pressable>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-              <Pressable onPress={adminSaveEdit} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
-              <Pressable onPress={() => setEditUser(null)} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      )}
-      </View>
-      )}
-
-      {adminTab === 'stats' && (
-        <View>
-          {loading ? <Text>Loading...</Text> : null}
-          {stats && (
-            <View style={styles.statsCard}>
-              <Text style={styles.statLine}>Total: {stats.total}</Text>
-              <Text style={styles.statLine}>Admins: {stats.admins}</Text>
-              <Text style={styles.statLine}>Distributors: {stats.distributors}</Text>
-              <Text style={styles.statLine}>Retailers: {stats.retailers}</Text>
-              <Text style={styles.statLine}>Active: {stats.active} | Inactive: {stats.inactive}</Text>
-              <Text style={[styles.statLine, { marginTop: 8 }]}>Recent:</Text>
-              {stats.recent.map((u) => (
-                <Text key={u._id} style={styles.statItem}>{u.name} • {u.email} • {u.role}</Text>
-              ))}
-              <View style={styles.chartBox}>
-                {(() => {
-                  const maxVal = Math.max(stats.total, stats.admins, stats.distributors, stats.retailers, (stats as any).products || 0);
-                  const rows = [
-                    { label: 'Total', value: stats.total, color: '#7c3aed' },
-                    { label: 'Admins', value: stats.admins, color: '#ef4444' },
-                    { label: 'Distributors', value: stats.distributors, color: '#16a34a' },
-                    { label: 'Retailers', value: stats.retailers, color: '#f59e0b' },
-                    { label: 'Products', value: (stats as any).products || 0, color: '#0ea5e9' },
-                  ];
-                  return rows.map((r) => (
-                    <View key={r.label} style={styles.chartRow}>
-                      <Text style={styles.chartLabel}>{r.label}</Text>
-                      <View style={[styles.chartBar, { width: `${maxVal ? Math.round((r.value / maxVal) * 100) : 0}%`, backgroundColor: r.color }]} />
-                      <Text style={styles.chartValue}>{r.value}</Text>
-                    </View>
-                  ));
-                })()}
-              </View>
-            </View>
-          )}
-        </View>
-      )}
-
-      {adminTab === 'products' && (
-        <View>
-          <View style={styles.formRow}>
-            <TextInput placeholder="Product name (English)" value={productName} onChangeText={setProductName} style={styles.input} />
-            <Pressable onPress={createProduct} style={styles.createBtn}><Text style={styles.createText}>Create</Text></Pressable>
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading ? <Text>Loading...</Text> : null}
-          <FlatList
-            data={products}
-            keyExtractor={(item) => item._id}
-            contentContainerStyle={styles.list}
-            ListEmptyComponent={<Text style={styles.empty}>No products yet</Text>}
-            renderItem={({ item }) => (
-              <View style={styles.card}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{item.nameEnglish}</Text>
-                  <Text style={styles.cardSubtitle}>{item.nameHindi}</Text>
-                  <Text style={styles.cardSubtitle}>
-                    {item.unit
-                      ? `Unit: ${(units.find((x) => x._id === item.unit)?.symbol || item.unit)}`
-                      : 'Unit: none'}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Text style={styles.badge}>{item.active ? 'active' : 'inactive'}</Text>
-                  <Pressable
-                    onPress={async () => {
-                      setEditProductUnits(item);
-                      setSelectedUnitId(item.unit || '');
-                      if (units.length === 0) await loadUnits();
-                    }}
-                    style={styles.secondaryBtn}
-                  >
-                    <Text style={styles.secondaryText}>Map Unit</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-          />
-          {Platform.OS === 'web' ? (
-            editProductUnits && (
-              <View style={styles.modal}>
-                <View style={styles.modalCard}>
-                  <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Select Unit</Text>
-                  <View style={{ maxHeight: 300 }}>
-                    <FlatList
-                      data={units}
-                      keyExtractor={(u) => u._id}
-                      renderItem={({ item: u }) => (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-                          <Pressable
-                            onPress={() => toggleUnitSelection(u._id)}
-                            style={[styles.roleBtn, selectedUnitId === u._id && styles.roleBtnActive]}
-                          >
-                            <Text style={styles.roleText}>{selectedUnitId === u._id ? '✓' : ''}</Text>
-                          </Pressable>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.cardTitle}>{u.symbol}</Text>
-                            <Text style={styles.cardSubtitle}>{u.formalName || ''}</Text>
-                            <Text style={styles.cardSubtitle}>Type: {u.type} • Decimals: {u.decimalPlaces ?? 0}</Text>
-                            {u.type === 'Compound' && (
-                              <Text style={styles.cardSubtitle}>
-                                {(units.find((x) => x._id === (u.firstUnit || ''))?.symbol || u.firstUnit || '')}
-                                {' → '}
-                                {(units.find((x) => x._id === (u.secondUnit || ''))?.symbol || u.secondUnit || '')}
-                                {' × '}
-                                {u.conversionFactor ?? ''}
-                              </Text>
-                            )}
-                          </View>
-                          <Text style={styles.badge}>{u.type}</Text>
-                        </View>
-                      )}
-                    />
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <Pressable onPress={saveUnitsForProduct} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
-                    <Pressable onPress={() => { setEditProductUnits(null); setSelectedUnitId(''); }} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-                  </View>
-                </View>
-              </View>
-            )
-          ) : (
-            <Modal visible={!!editProductUnits} transparent animationType="fade" onRequestClose={() => { setEditProductUnits(null); setSelectedUnitId(''); }}>
-              <View style={styles.modal}>
-                <View style={styles.modalCard}>
-                  <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Select Unit</Text>
-                  <View style={{ maxHeight: 300 }}>
-                    <FlatList
-                      data={units}
-                      keyExtractor={(u) => u._id}
-                      renderItem={({ item: u }) => (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-                          <Pressable
-                            onPress={() => toggleUnitSelection(u._id)}
-                            style={[styles.roleBtn, selectedUnitId === u._id && styles.roleBtnActive]}
-                          >
-                            <Text style={styles.roleText}>{selectedUnitId === u._id ? '✓' : ''}</Text>
-                          </Pressable>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.cardTitle}>{u.symbol}</Text>
-                            <Text style={styles.cardSubtitle}>{u.formalName || ''}</Text>
-                            <Text style={styles.cardSubtitle}>Type: {u.type} • Decimals: {u.decimalPlaces ?? 0}</Text>
-                            {u.type === 'Compound' && (
-                              <Text style={styles.cardSubtitle}>
-                                {(units.find((x) => x._id === (u.firstUnit || ''))?.symbol || u.firstUnit || '')}
-                                {' → '}
-                                {(units.find((x) => x._id === (u.secondUnit || ''))?.symbol || u.secondUnit || '')}
-                                {' × '}
-                                {u.conversionFactor ?? ''}
-                              </Text>
-                            )}
-                          </View>
-                          <Text style={styles.badge}>{u.type}</Text>
-                        </View>
-                      )}
-                    />
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <Pressable onPress={saveUnitsForProduct} style={styles.primaryBtn}><Text style={styles.primaryText}>Save</Text></Pressable>
-                    <Pressable onPress={() => { setEditProductUnits(null); setSelectedUnitId(''); }} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-                  </View>
-                </View>
-              </View>
-            </Modal>
-          )}
-        </View>
-      )}
-
-      {adminTab === 'units' && (
-        <View>
-          <View style={styles.formRow}>
-            <View style={styles.roleRow}>
-              <Pressable onPress={() => setUnitFilterType('all')} style={[styles.roleBtn, unitFilterType === 'all' && styles.roleBtnActive]}>
-                <Text style={styles.roleText}>All</Text>
-              </Pressable>
-              <Pressable onPress={() => setUnitFilterType('Simple')} style={[styles.roleBtn, unitFilterType === 'Simple' && styles.roleBtnActive]}>
-                <Text style={styles.roleText}>Simple</Text>
-              </Pressable>
-              <Pressable onPress={() => setUnitFilterType('Compound')} style={[styles.roleBtn, unitFilterType === 'Compound' && styles.roleBtnActive]}>
-                <Text style={styles.roleText}>Compound</Text>
-              </Pressable>
-            </View>
-          </View>
-          <View style={styles.formRow}>
-            <TextInput placeholder="Search symbol" value={unitSymbolQuery} onChangeText={setUnitSymbolQuery} style={styles.input} />
-            <Pressable onPress={loadUnits} style={styles.secondaryBtn}><Text style={styles.secondaryText}>Search</Text></Pressable>
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading ? <Text>Loading...</Text> : null}
-          <FlatList
-            data={units}
-            keyExtractor={(item) => item._id}
-            contentContainerStyle={styles.list}
-            ListEmptyComponent={<Text style={styles.empty}>No units</Text>}
-            renderItem={({ item }) => (
-              <View style={styles.card}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{item.symbol}</Text>
-                  <Text style={styles.cardSubtitle}>{item.formalName || ''}</Text>
-                  <Text style={styles.cardSubtitle}>Type: {item.type} • Decimals: {item.decimalPlaces ?? 0}</Text>
-                  {item.type === 'Compound' && (
-                    <Text style={styles.cardSubtitle}>
-                      {(units.find((x) => x._id === (item.firstUnit || ''))?.symbol || item.firstUnit || '')}
-                      {' → '}
-                      {(units.find((x) => x._id === (item.secondUnit || ''))?.symbol || item.secondUnit || '')}
-                      {' × '}
-                      {item.conversionFactor ?? ''}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ gap: 6 }}>
-                  <Text style={styles.badge}>{item.type}</Text>
-                  {item.type === 'Compound' && (
-                    <Text style={styles.statItem}>x {item.conversionFactor}</Text>
-                  )}
-                </View>
-              </View>
-            )}
-          />
-        </View>
-      )}
-
-      <StatusBar style="auto" />
-    </View>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -1197,10 +1198,16 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingHorizontal: 16,
   },
+  centerContent: {
+    justifyContent: 'center',
+    paddingTop: 0,
+  },
   title: {
-    fontSize: 22,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 24,
+    textAlign: 'center',
+    color: '#1e293b',
   },
   hero: {
     borderRadius: 16,
@@ -1222,17 +1229,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   formCol: {
-    gap: 8,
+    gap: 12,
     marginBottom: 12,
   },
   input: {
-    flex: 1,
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    height: 50,
+    fontSize: 16,
+    color: '#0f172a',
+    marginBottom: 0,
+    width: '100%',
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#64748b',
+    marginBottom: 4,
   },
   roleRow: {
     flexDirection: 'row',
@@ -1261,6 +1277,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 6,
+    justifyContent: 'center',
   },
   createText: {
     color: '#fff',
@@ -1268,14 +1285,16 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     backgroundColor: '#16a34a',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignSelf: 'stretch',
+    alignItems: 'center',
   },
   primaryText: {
     color: '#fff',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 16,
   },
   secondaryBtn: {
     backgroundColor: '#fff3d6',
@@ -1290,15 +1309,19 @@ const styles = StyleSheet.create({
   },
   linkBtn: {
     paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    alignSelf: 'center',
   },
   linkText: {
     color: '#7c3aed',
-    fontWeight: '500',
+    fontWeight: '600',
+    fontSize: 15,
   },
   error: {
-    color: '#d00',
+    color: '#ef4444',
     marginBottom: 8,
+    fontSize: 14,
+    textAlign: 'center',
   },
   disabledBtn: {
     opacity: 0.5,
@@ -1317,28 +1340,37 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: 8,
+    paddingBottom: 20,
   },
   empty: {
     color: '#666',
+    textAlign: 'center',
+    marginTop: 20,
   },
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#eee',
     borderRadius: 8,
-    padding: 12,
-    gap: 12,
+    padding: 16,
+    gap: 8,
+    marginBottom: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#0f172a',
   },
   cardSubtitle: {
-    color: '#555',
+    color: '#64748b',
     marginTop: 2,
-    marginBottom: 6,
+    marginBottom: 4,
+    fontSize: 14,
   },
   badge: {
     alignSelf: 'flex-start',
@@ -1368,18 +1400,20 @@ const styles = StyleSheet.create({
   },
   toggleText: {
     fontWeight: '600',
+    fontSize: 12,
   },
   tabBtn: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 6,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#ccc',
     backgroundColor: '#fff',
+    marginRight: 8,
   },
   tabScroll: {
-    gap: 8,
-    marginBottom: 12,
+    marginBottom: 16,
+    flexGrow: 0,
   },
   tabIcon: {
     width: 16,
@@ -1392,6 +1426,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontWeight: '600',
+    color: '#333',
   },
   modal: {
     position: (Platform.OS === 'web' ? 'fixed' : 'absolute') as any,
@@ -1399,30 +1434,41 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
-    userSelect: 'none',
   },
   modalCard: {
     width: '90%',
-    maxWidth: 480,
+    maxWidth: 400,
     backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   statsCard: {
     backgroundColor: '#fff',
     borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#eee',
+    padding: 16,
+    gap: 4,
+  },
+  statLine: {
+    fontSize: 15,
+    color: '#334155',
+  },
+  statItem: {
+    fontSize: 13,
+    color: '#64748b',
+    marginLeft: 8,
+    marginBottom: 2,
   },
   chartBox: {
-    marginTop: 12,
+    marginTop: 16,
     gap: 8,
   },
   chartRow: {
@@ -1431,24 +1477,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chartLabel: {
-    width: 110,
-    fontWeight: '600',
+    width: 80,
+    fontSize: 12,
+    color: '#64748b',
   },
   chartBar: {
-    height: 12,
-    borderRadius: 999,
-    flexGrow: 1,
-    backgroundColor: '#7c3aed',
+    height: 8,
+    borderRadius: 4,
+    flex: 1,
   },
   chartValue: {
-    width: 40,
+    width: 30,
+    fontSize: 12,
     textAlign: 'right',
-    fontWeight: '600',
-  },
-  statLine: {
-    fontWeight: '600',
-  },
-  statItem: {
-    color: '#333',
+    color: '#334155',
   },
 });

@@ -37,7 +37,7 @@ const simple = [
   {
     _id: O('68a05ede1aa07bbc34aaca5a'),
     type: 'Simple',
-    symbol: 'Milk crt',
+    symbol: 'MCT',
     formalName: 'Milk crate',
     decimalPlaces: 0,
     createdAt: D('2025-08-16T10:35:10.833Z'),
@@ -64,7 +64,7 @@ const compound = [
   {
     _id: O('68a1b2f4ea019073c382e972'),
     type: 'Compound',
-    symbol: 'Milk crt/Kg',
+    symbol: 'MCT/Kg',
     formalName: 'Milk crate per Kilo',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -75,7 +75,7 @@ const compound = [
   {
     _id: O('68a2b1ba4b7181b6c608e931'),
     type: 'Compound',
-    symbol: 'Milk crt/Box',
+    symbol: 'MCT/Box',
     formalName: 'Milk crate per Box',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -86,7 +86,7 @@ const compound = [
   {
     _id: O('68a2b1cb4b7181b6c608e937'),
     type: 'Compound',
-    symbol: 'Milk crt/Box',
+    symbol: 'MCT/Box',
     formalName: 'Milk crate per Box',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -97,7 +97,7 @@ const compound = [
   {
     _id: O('68a2c4c6440962a09d36cf98'),
     type: 'Compound',
-    symbol: 'Milk crt/Kg',
+    symbol: 'MCT/Kg',
     formalName: 'Milk crate per Kilo',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -108,7 +108,7 @@ const compound = [
   {
     _id: O('68a493db0f16c9aff95cc51a'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -119,7 +119,7 @@ const compound = [
   {
     _id: O('68a562bf5f1f64d31750c405'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -130,7 +130,7 @@ const compound = [
   {
     _id: O('68a8220dd25c0f0e6ef143af'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -141,7 +141,7 @@ const compound = [
   {
     _id: O('68a8221ad25c0f0e6ef143b5'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -152,7 +152,7 @@ const compound = [
   {
     _id: O('68a8222dd25c0f0e6ef143bb'),
     type: 'Compound',
-    symbol: 'Milk crt/Box',
+    symbol: 'MCT/Box',
     formalName: 'Milk crate per Box',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -163,7 +163,7 @@ const compound = [
   {
     _id: O('68a82260d25c0f0e6ef143c1'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -174,7 +174,7 @@ const compound = [
   {
     _id: O('68a824b513257fc97ea10244'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),
@@ -185,7 +185,7 @@ const compound = [
   {
     _id: O('68a8250713257fc97ea1024a'),
     type: 'Compound',
-    symbol: 'Milk crt/Pcs',
+    symbol: 'MCT/Pcs',
     formalName: 'Milk crate per Pisces',
     decimalPlaces: 0,
     firstUnit: O('68a05ede1aa07bbc34aaca5a'),

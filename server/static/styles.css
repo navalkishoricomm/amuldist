@@ -19,3 +19,22 @@ body { background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); padding-to
 .toolbar-links a:hover { background-color: #f3e8ff; }
 .header-tabs .nav-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; }
 .header-tabs .nav-link:hover { background-color: #f3e8ff; }
+
+/* Mobile adjustments for quantity inputs (compound and simple) */
+@media (max-width: 600px) {
+  .input-group.input-group-sm .form-control {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+  .input-group.input-group-sm .input-group-text {
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+  .in-first, .in-second, .out-first, .out-second, .r-first, .r-second {
+    min-width: 0;
+  }
+  .in-simple, .out-simple, .r-simple {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+}

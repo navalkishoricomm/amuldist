@@ -69,11 +69,29 @@
           <div class="col-12">
             <div class="card p-3 h-100 shadow-sm border-0">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="fw-bold">Order History</div>
-                <button class="btn btn-sm btn-outline-secondary" onclick="renderRetailerOrders()"><i class="bi bi-arrow-repeat"></i></button>
+                <div class="fw-bold">Transaction History</div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadRetailerTransactions()"><i class="bi bi-arrow-repeat"></i></button>
               </div>
-              <div id="orderHistoryList" class="scroll-section" style="max-height: 75vh;"></div>
+              <div class="row g-2 mb-2">
+                <div class="col-12"><input id="txFilterType" class="form-control form-control-sm" placeholder="Filter Type (e.g. payment_cash)" /></div>
+                <div class="col-6"><input id="txFilterFrom" type="date" class="form-control form-control-sm" /></div>
+                <div class="col-6"><input id="txFilterTo" type="date" class="form-control form-control-sm" /></div>
+                <div class="col-12"><button class="btn btn-sm btn-primary w-100" onclick="loadRetailerTransactions()">Apply Filters</button></div>
+              </div>
+              <div id="orderHistoryList" class="scroll-section" style="max-height: 65vh;"></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile Tab -->
+      <div class="tab-pane fade" id="tab-profile" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+             <div class="card p-3 shadow-sm border-0">
+               <h5 class="card-title mb-3">My Profile</h5>
+               <div id="retailerProfileContent">Loading...</div>
+             </div>
           </div>
         </div>
       </div>
@@ -91,9 +109,15 @@
           </button>
         </li>
         <li class="nav-item">
-          <button class="nav-link rounded-0 py-2" data-bs-toggle="tab" data-bs-target="#tab-history" type="button" role="tab">
+          <button class="nav-link rounded-0 py-2" data-bs-toggle="tab" data-bs-target="#tab-history" type="button" role="tab" onclick="loadRetailerTransactions()">
             <i class="bi bi-clock-history bottom-nav-icon"></i>
             <span class="bottom-nav-text">History</span>
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link rounded-0 py-2" data-bs-toggle="tab" data-bs-target="#tab-profile" type="button" role="tab" onclick="renderRetailerProfile()">
+            <i class="bi bi-person bottom-nav-icon"></i>
+            <span class="bottom-nav-text">Profile</span>
           </button>
         </li>
       </ul>
@@ -101,6 +125,6 @@
   </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="/ui/app.js?v=4"></script>
+   <script src="/ui/app.js?v=23"></script>
 </body>
 </html>

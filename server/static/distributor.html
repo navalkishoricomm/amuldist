@@ -12,6 +12,25 @@
     .nav-link { color: #6c757d; }
     .nav-link.active { color: #0d6efd; font-weight: bold; }
     .scroll-section { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .navbar { padding-top: .25rem; padding-bottom: .25rem; }
+    .navbar-brand { font-size: 1rem; }
+    .navbar .navbar-toggler { padding: .15rem .4rem; }
+    .offcanvas-title { font-size: 1rem; }
+    .offcanvas { --bs-offcanvas-height: 50vh; }
+    .offcanvas-end { --bs-offcanvas-width: 50vw; }
+    .offcanvas .nav-link { padding: .25rem .5rem; }
+    @media (max-width: 360px) {
+      .col-stock { display: none !important; }
+      .sm-hide { display: none !important; }
+      #tab-stock-in .table .input-group.input-group-sm,
+      #tab-stock-out .table .input-group.input-group-sm { flex-wrap: nowrap; }
+      #tab-stock-in .table .input-group.input-group-sm .form-control.qty-narrow,
+      #tab-stock-out .table .input-group.input-group-sm .form-control.qty-narrow { width: 64px; padding: .125rem .25rem; }
+      #tab-stock-in .table .input-group.input-group-sm .input-group-text,
+      #tab-stock-out .table .input-group.input-group-sm .input-group-text { padding: .125rem .25rem; font-size: .75rem; }
+      #tab-stock-in .table td, #tab-stock-in .table th,
+      #tab-stock-out .table td, #tab-stock-out .table th { padding: 0.25rem; }
+    }
   </style>
 </head>
 <body style="padding-top: 0; background-color: #f8f9fa;">
@@ -23,7 +42,7 @@
         <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasNavbar">
           <span class="navbar-toggler-icon"></span>
         </button>
-        <div class="offcanvas offcanvas-end" tabindex="-1" id="offcanvasNavbar">
+        <div class="offcanvas offcanvas-end" tabindex="-1" id="offcanvasNavbar" data-bs-scroll="true" data-bs-backdrop="false">
           <div class="offcanvas-header">
             <h5 class="offcanvas-title fw-bold">Menu</h5>
             <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas"></button>
@@ -93,6 +112,37 @@
       <!-- Dashboard Tab -->
       <div class="tab-pane fade show active" id="tab-dashboard" role="tabpanel">
         <div class="row g-3 animate__animated animate__fadeIn">
+          
+          <!-- Stats Row -->
+          <div class="col-12">
+            <div class="row g-2 mb-2">
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0">
+                    <div class="text-muted small">Inventory</div>
+                    <div id="dStatInventory" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0">
+                    <div class="text-muted small">Low Stock</div>
+                    <div id="dStatLowStock" class="fw-bold fs-4 text-danger">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0">
+                    <div class="text-muted small">Retailers</div>
+                    <div id="dStatRetailers" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0">
+                    <div class="text-muted small">Today's Orders</div>
+                    <div id="dStatOrders" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+            </div>
+          </div>
+
           <div class="col-12">
             <div class="fw-bold mb-2">Quick Actions</div>
             <div class="row g-2">
@@ -161,10 +211,10 @@
                 </div>
               </div>
               <div class="d-flex gap-2 mb-2">
-                 <input id="distProdName" class="form-control form-control-sm" placeholder="Product name" />
-                 <div class="input-group input-group-sm" style="min-width:150px">
-                   <select id="distUnit" class="form-select"></select>
-                   <button id="distUnitInfo" class="btn btn-outline-secondary" type="button" title="Unit Details"><i class="bi bi-info-circle"></i></button>
+                 <input id="distProdName" class="form-control form-control-sm flex-grow-1" placeholder="Product name" />
+                 <div class="input-group input-group-sm" style="width:70px; flex-shrink:0;">
+                   <select id="distUnit" class="form-select" style="font-size:0.7rem; padding:0.1rem 0.1rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;"></select>
+                   <button id="distUnitInfo" class="btn btn-outline-secondary" type="button" title="Unit Details" style="padding:0.1rem 0.1rem;"><i class="bi bi-info-circle"></i></button>
                  </div>
                  <button id="distProdAdd" class="btn btn-sm btn-primary"><i class="bi bi-plus"></i> Add</button>
               </div>
@@ -221,7 +271,7 @@
                   <thead class="table-light sticky-top">
                     <tr>
                       <th style="width: 40%">Product</th>
-                      <th style="width: 15%" class="text-center">Cur</th>
+                      <th style="width: 15%" class="text-center col-stock">Cur</th>
                       <th style="width: 45%">In Qty</th>
                     </tr>
                   </thead>
@@ -284,7 +334,7 @@
                   <thead class="table-light sticky-top">
                     <tr>
                       <th style="width: 36%">Product</th>
-                      <th style="width: 14%" class="text-center">Stock</th>
+                      <th style="width: 14%" class="text-center col-stock">Stock</th>
                       <th style="width: 25%">Out Qty</th>
                       <th style="width: 25%" class="text-end">Amount</th>
                     </tr>
@@ -350,10 +400,23 @@
           <div class="col-12">
             <div class="card p-3 h-100 shadow-sm border-0">
               <div class="fw-bold mb-2">Rates Management</div>
-              <div class="mb-2">
-                <select id="rateRetailerSel" class="form-select form-select-sm"></select>
-              </div>
-              <div id="rateRows" class="scroll-section" style="max-height: 70vh;"></div>
+                <div class="mb-2">
+                  <select id="rateRetailerSel" class="form-select form-select-sm" onchange="renderRatesTable()">
+                    <option value="">Loading...</option>
+                  </select>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle">
+                    <thead>
+                      <tr id="rateHeaderRow">
+                        <th>Product</th>
+                        <th style="width:120px">Default Price</th>
+                        <th style="width:120px">Retailer Price</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rateRows"></tbody>
+                  </table>
+                </div>
             </div>
           </div>
         </div>
@@ -445,9 +508,10 @@
       <div class="modal-content">
         <div class="modal-header"><h5 class="modal-title">Record Payment</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
-          <input type="hidden" id="payRetailerId" />
-          <div class="mb-2 fw-bold" id="payRetailerName"></div>
-          <div class="mb-2"><label class="form-label">Amount (₹)</label><input id="payAmount" type="number" class="form-control" /></div>
+                  <input type="hidden" id="payRetailerId" />
+                  <div class="mb-2 fw-bold" id="payRetailerName"></div>
+                  <div class="mb-2 small text-muted">Current Balance: <span id="payCurrentBalance" class="fw-bold text-dark">₹0.00</span></div>
+                  <div class="mb-2"><label class="form-label">Amount (₹)</label><input id="payAmount" type="number" class="form-control" /></div>
           <div class="mb-2">
             <label class="form-label">Type</label>
             <select id="payType" class="form-select">
@@ -543,6 +607,18 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <div id="notifyArea" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
-  <script src="/ui/app.js?v=4"></script>
+  <script src="/ui/app.js?v=23"></script>
+  <script>
+    // Failsafe: if app.js didn't init properly, try manually
+    window.onload = function() {
+      setTimeout(() => {
+        if (!window.switchTab && typeof loadDistributor === 'function') {
+           loadDistributor();
+        } else if (window.switchTab && !document.querySelector('.tab-pane.active')) {
+           window.switchTab('tab-dashboard');
+        }
+      }, 500);
+    };
+  </script>
 </body>
 </html>

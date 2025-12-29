@@ -1,25 +1,31 @@
 const mongoose = require('mongoose');
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
 
-const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/amul_dist_app';
+const mongoUri = 'mongodb://127.0.0.1:27017/amul_dist_app';
 
-const userSchema = new mongoose.Schema({}, { strict: false });
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  role: String,
+  distributorId: mongoose.Schema.Types.ObjectId
+});
 const User = mongoose.model('User', userSchema);
 
-async function check() {
+async function checkUser() {
   try {
     await mongoose.connect(mongoUri);
-    console.log('Connected to', mongoUri);
-    
-    const retailerId = '693e42e106110d7635e57cb7';
-    const user = await User.findById(retailerId);
-    console.log('User found:', user);
-    
-  } catch (e) {
-    console.error(e);
+    const user = await User.findOne({ email: 'rohitk29@gmail.com' });
+    if (user) {
+      console.log('User found:', user);
+    } else {
+      console.log('User not found');
+    }
+  } catch (err) {
+    console.error(err);
   } finally {
     await mongoose.disconnect();
   }
 }
 
-check();
+checkUser();
