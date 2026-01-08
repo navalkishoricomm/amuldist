@@ -24,11 +24,11 @@ const port = process.env.PORT || 4000;
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: { type: String, unique: true, lowercase: true, trim: true, sparse: true },
     role: { type: String, enum: ['admin', 'distributor', 'retailer', 'staff'], required: true },
     active: { type: Boolean, default: true },
     passwordHash: { type: String, required: true },
-    phone: { type: String },
+    phone: { type: String, unique: true, trim: true, sparse: true },
     address: { type: String },
     distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     permissions: [{ type: String }],
@@ -47,6 +47,7 @@ const productSchema = new mongoose.Schema(
     nameHindi: { type: String, required: true, trim: true },
     active: { type: Boolean, default: true },
     unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit' },
+    price: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -82,6 +83,7 @@ const rateSchema = new mongoose.Schema(
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     price: { type: Number, required: true },
+    history: [{ date: { type: Date, default: Date.now }, price: Number }]
   },
   { timestamps: true }
 );
@@ -116,6 +118,7 @@ const distProductSchema = new mongoose.Schema(
     nameHindi: { type: String, required: true, trim: true },
     active: { type: Boolean, default: true },
     unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit' },
+    price: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -152,11 +155,17 @@ const stockMoveSchema = new mongoose.Schema(
     retailerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
     createdByStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    dayKey: { type: String },
     type: { type: String, enum: ['IN', 'OUT'], required: true },
     quantity: { type: Number, required: true },
+    price: { type: Number },
     note: { type: String },
   },
   { timestamps: true }
+);
+stockMoveSchema.index(
+  { distributorId: 1, supplierId: 1, productId: 1, type: 1, dayKey: 1 },
+  { unique: true, partialFilterExpression: { supplierId: { $exists: true }, dayKey: { $exists: true } } }
 );
 const StockMove = mongoose.model('StockMove', stockMoveSchema);
 
@@ -208,7 +217,7 @@ const transactionSchema = new mongoose.Schema(
     distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     retailerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     createdByStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    type: { type: String, enum: ['order', 'payment_cash', 'payment_online'], required: true },
+    type: { type: String, enum: ['order', 'payment_cash', 'payment_online', 'adjustment'], required: true },
     amount: { type: Number, required: true },
     referenceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order' },
     note: { type: String },
@@ -299,17 +308,17 @@ app.get('/api/my/staff', auth, requireDistributor, async (req, res) => {
 
 app.post('/api/my/staff', auth, requireDistributor, async (req, res) => {
   try {
-    const { name, email, password, permissions } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: 'Name, email, password required' });
+    const { name, phone, password, permissions } = req.body;
+    if (!name || !phone || !password) return res.status(400).json({ error: 'Name, phone, password required' });
     const passwordHash = await bcrypt.hash(String(password), 10);
     const s = await User.create({
-      name, email, role: 'staff', active: true, passwordHash,
+      name, phone, role: 'staff', active: true, passwordHash,
       distributorId: req.user._id,
       permissions: Array.isArray(permissions) ? permissions : []
     });
     res.status(201).json(s);
   } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ error: 'Email already exists' });
+    if (err.code === 11000) return res.status(400).json({ error: 'Phone already exists' });
     res.status(500).json({ error: 'Failed to create staff' });
   }
 });
@@ -317,17 +326,19 @@ app.post('/api/my/staff', auth, requireDistributor, async (req, res) => {
 app.patch('/api/my/staff/:id', auth, requireDistributor, async (req, res) => {
   try {
     const { id } = req.params;
-    const { permissions, active, password } = req.body;
+    const { permissions, active, password, phone } = req.body;
     const s = await User.findOne({ _id: id, role: 'staff', distributorId: req.user._id });
     if (!s) return res.status(404).json({ error: 'Staff not found' });
     
     if (permissions !== undefined) s.permissions = Array.isArray(permissions) ? permissions : [];
     if (active !== undefined) s.active = active;
+    if (phone) s.phone = phone;
     if (password) s.passwordHash = await bcrypt.hash(String(password), 10);
     
     await s.save();
     res.json(s);
   } catch (err) {
+    if (err.code === 11000) return res.status(400).json({ error: 'Phone already exists' });
     res.status(500).json({ error: 'Failed to update staff' });
   }
 });
@@ -561,16 +572,16 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email/phone and password are required' });
-    
-    // Allow login by email or phone
-    const user = await User.findOne({
-      $or: [
-        { email: email.toLowerCase() },
-        { phone: email }
-      ]
-    });
-
+    const input = String(email).trim();
+    const isEmail = input.includes('@');
+    let user = null;
+    if (isEmail) {
+      user = await User.findOne({ email: input.toLowerCase() });
+    } else {
+      user = await User.findOne({ phone: input });
+    }
     if (!user) return res.status(401).json({ error: 'invalid credentials' });
+    if (user.role === 'staff' && isEmail) return res.status(400).json({ error: 'Staff must login with mobile number' });
     if (!user.active) return res.status(403).json({ error: 'user inactive' });
     const ok = await bcrypt.compare(String(password), user.passwordHash);
     if (!ok) return res.status(401).json({ error: 'invalid credentials' });
@@ -836,6 +847,21 @@ app.post('/api/products', auth, requireAdminOrDistributor, async (req, res) => {
   }
 });
 
+app.get('/api/products/:id', auth, requireReadAccess, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pid = new mongoose.Types.ObjectId(String(id));
+    let p = await Product.findById(pid).populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } });
+    if (!p) {
+        p = await DistProduct.findById(pid).populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } });
+    }
+    if (!p) return res.status(404).json({ error: 'product not found' });
+    res.json(p);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch product' });
+  }
+});
+
 app.patch('/api/products/:id', auth, requireAdminOrDistributor, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1078,9 +1104,14 @@ app.get('/api/my/products', auth, requireDistributorOrStaff(null), async (req, r
          path: 'unit',
          populate: { path: 'firstUnit secondUnit' }
       });
+
+    const globalRates = await GlobalRate.find({});
+    const grMap = {};
+    globalRates.forEach(r => grMap[String(r.productId)] = r.price);
+
     const items = [
-      ...globals.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, source: 'global' })),
-      ...custom.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, source: 'custom' })),
+      ...globals.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: grMap[String(p._id)] || p.price || 0, source: 'global' })),
+      ...custom.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price || 0, source: 'custom' })),
     ];
     res.json(items);
   } catch (err) {
@@ -1114,14 +1145,14 @@ app.get('/api/my/inventory', auth, requireDistributorOrStaff(null), async (req, 
 
 app.post('/api/my/products', auth, requireDistributor, async (req, res) => {
   try {
-    const { nameEnglish, unit } = req.body;
+    const { nameEnglish, unit, price } = req.body;
     if (!nameEnglish) return res.status(400).json({ error: 'nameEnglish is required' });
     let unitId;
     if (unit !== undefined && unit !== null && unit !== '') {
       try { unitId = new mongoose.Types.ObjectId(String(unit)); } catch { return res.status(400).json({ error: 'invalid unit id' }); }
     }
-    const p = await DistProduct.create({ distributorId: req.user._id, nameEnglish, nameHindi: nameEnglish, active: true, unit: unitId });
-    res.status(201).json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, source: 'custom' });
+    const p = await DistProduct.create({ distributorId: req.user._id, nameEnglish, nameHindi: nameEnglish, active: true, unit: unitId, price: Number(price) || 0 });
+    res.status(201).json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, source: 'custom' });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'nameEnglish already exists' });
     res.status(500).json({ error: 'Failed to create my product' });
@@ -1131,7 +1162,7 @@ app.post('/api/my/products', auth, requireDistributor, async (req, res) => {
 app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => {
   try {
     const { id } = req.params;
-    const { unit } = req.body;
+    const { unit, price } = req.body;
     const pid = new mongoose.Types.ObjectId(String(id));
     const custom = await DistProduct.findOne({ _id: pid, distributorId: req.user._id });
     if (!custom) return res.status(404).json({ error: 'product not found' });
@@ -1146,6 +1177,7 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
     }
 
     const update = {};
+    if (price !== undefined) update.price = Number(price) || 0;
     if (unit !== undefined) {
       if (unit === null || unit === '') {
         update.unit = null;
@@ -1154,7 +1186,7 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
       }
     }
     const p = await DistProduct.findByIdAndUpdate(custom._id, update, { new: true });
-    res.json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, source: 'custom' });
+    res.json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, source: 'custom' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update my product' });
   }
@@ -1260,7 +1292,7 @@ app.get('/api/orders/:id', auth, requireDistributorOrStaff(null), async (req, re
     const order = await Order.findOne(query)
       .populate({
         path: 'items.productId',
-        select: 'nameEnglish nameHindi unit',
+        select: 'nameEnglish nameHindi unit price',
         populate: {
           path: 'unit',
           populate: { path: 'firstUnit secondUnit' }
@@ -1292,9 +1324,9 @@ app.post('/api/retailer/orders', auth, requireRetailer, async (req, res) => {
       
       const inv = await Inventory.findOne({ distributorId: distId, productId: pid });
       const available = inv ? inv.quantity : 0;
-      if (qty > available) {
-        return res.status(400).json({ error: `Insufficient stock for product ${pid}` });
-      }
+      // if (qty > available) {
+      //   return res.status(400).json({ error: `Insufficient stock for product ${pid}` });
+      // }
       
       let pObj = await Product.findById(pid).populate('unit');
       if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
@@ -1377,6 +1409,205 @@ app.get('/api/retailer/orders', auth, requireRetailer, async (req, res) => {
   }
 });
 
+app.get('/api/debug/fix-ledger', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const force = req.query.force === 'true'; // Add force param
+    console.log('Fix Ledger called with force:', force, 'query:', req.query);
+    const ctx = getContext(req);
+    // Look back to Dec 28 to cover recent issues
+    const startOfDay = new Date('2025-12-28T00:00:00Z');
+    
+    const moves = await StockMove.find({ 
+        distributorId: ctx.distributorId, 
+        type: 'OUT',
+        createdAt: { $gte: startOfDay } 
+    }).sort({ createdAt: 1 });
+
+    let fixedCount = 0;
+    const details = [];
+
+    // Group moves by retailer and time window (10s)
+    const sessions = [];
+    for (const move of moves) {
+        let added = false;
+        for (const session of sessions) {
+            if (session.retailerId.toString() === move.retailerId.toString()) {
+                 const timeDiff = Math.abs(new Date(session.createdAt) - new Date(move.createdAt));
+                 if (timeDiff < 10000) { // 10 seconds window
+                     session.moves.push(move);
+                     added = true;
+                     break;
+                 }
+            }
+        }
+        if (!added) {
+            sessions.push({
+                retailerId: move.retailerId,
+                createdAt: move.createdAt,
+                moves: [move]
+            });
+        }
+    }
+    
+    for (const session of sessions) {
+        // Calculate total amount and items for the session
+        let sessionTotal = 0;
+        const items = [];
+        let note = '';
+        let createdByStaffId = null;
+
+        for (const move of session.moves) {
+             const pid = move.productId;
+             const rid = move.retailerId;
+             const quantity = move.quantity;
+             
+             if (move.note && !note) note = move.note;
+             if (move.createdByStaffId && !createdByStaffId) createdByStaffId = move.createdByStaffId;
+
+            let pObj = await Product.findById(pid).populate('unit');
+            if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
+            
+            let price = 0;
+            const rr = await RetailerRate.findOne({ distributorId: ctx.distributorId, retailerId: rid, productId: pid });
+            if (rr) price = rr.price;
+            else {
+              const dr = await Rate.findOne({ distributorId: ctx.distributorId, productId: pid });
+              if (dr) price = dr.price;
+              else {
+                const gr = await GlobalRate.findOne({ productId: pid });
+                if(gr) price = gr.price;
+              }
+            }
+
+            const u = pObj ? pObj.unit : null;
+            const isCompound = u && String(u.type) === 'Compound';
+            const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
+            let itemTotal = 0;
+            if(isCompound && conv > 0){
+               itemTotal = (price / conv) * quantity;
+            } else {
+               itemTotal = price * quantity;
+            }
+            sessionTotal += itemTotal;
+            items.push({ productId: pid, quantity, price });
+        }
+        
+        if (!note) note = 'Stock Out';
+
+        // Check if transaction exists near this time (within 10 seconds of session start)
+        const timeStart = new Date(session.createdAt);
+        timeStart.setSeconds(timeStart.getSeconds() - 10);
+        const timeEnd = new Date(session.createdAt);
+        timeEnd.setSeconds(timeEnd.getSeconds() + 10);
+        
+        const existingList = await Transaction.find({
+            distributorId: ctx.distributorId,
+            retailerId: session.retailerId,
+            createdAt: { $gte: timeStart, $lte: timeEnd }
+        }).sort({ createdAt: 1 });
+        
+        if (existingList.length === 0) {
+             // Create new
+            const order = await Order.create({
+                retailerId: session.retailerId,
+                distributorId: ctx.distributorId,
+                items: items,
+                totalAmount: sessionTotal,
+                status: 'delivered',
+                note: note,
+                createdAt: session.createdAt
+            });
+
+            await User.findByIdAndUpdate(session.retailerId, { $inc: { currentBalance: sessionTotal } });
+            await Transaction.create({
+                distributorId: ctx.distributorId,
+                retailerId: session.retailerId,
+                type: 'order',
+                amount: sessionTotal,
+                referenceId: order._id,
+                note: note,
+                createdByStaffId: createdByStaffId,
+                createdAt: session.createdAt
+            });
+            fixedCount++;
+            details.push({ 
+                sessionId: session.createdAt, 
+                status: 'FIXED_NEW', 
+                amount: sessionTotal,
+                movesCount: session.moves.length
+            });
+        } else if (existingList.length > 1 || force) {
+            // Consolidate or Force Update
+            const primary = existingList[0];
+            const others = existingList.slice(1);
+            
+            // Calculate sum of amounts of transactions being replaced/updated
+            let oldTotal = primary.amount;
+            for(const t of others) oldTotal += t.amount;
+            
+            // Difference
+            const diff = sessionTotal - oldTotal;
+            
+            // Update Balance if difference is significant
+            if (Math.abs(diff) > 0.01) {
+                await User.findByIdAndUpdate(session.retailerId, { $inc: { currentBalance: diff } });
+            }
+            
+            // Update Primary Transaction
+            primary.amount = sessionTotal;
+            // Use existing note if not generic, otherwise use new note
+            if (primary.note === 'Auto-fixed Stock Out' || primary.note === 'Stock Out') {
+                primary.note = note;
+            }
+            
+            // Update Primary Order
+            if (primary.referenceId) {
+                await Order.updateOne({ _id: primary.referenceId }, { 
+                    totalAmount: sessionTotal, 
+                    note: primary.note,
+                    items: items 
+                });
+            } else {
+                 const order = await Order.create({
+                    retailerId: session.retailerId,
+                    distributorId: ctx.distributorId,
+                    items: items,
+                    totalAmount: sessionTotal,
+                    status: 'delivered',
+                    note: primary.note,
+                    createdAt: session.createdAt
+                });
+                primary.referenceId = order._id;
+            }
+            await primary.save();
+
+            // Delete others
+            for(const t of others) {
+                await Transaction.findByIdAndDelete(t._id);
+                if(t.referenceId) await Order.findByIdAndDelete(t.referenceId);
+            }
+
+            fixedCount++;
+            details.push({ 
+                sessionId: session.createdAt, 
+                status: 'CONSOLIDATED', 
+                amount: sessionTotal, 
+                oldTxCount: existingList.length 
+            });
+        } else {
+            details.push({ 
+                sessionId: session.createdAt, 
+                status: 'SKIPPED_EXISTS', 
+                txId: existingList[0]._id 
+            });
+        }
+    }
+    res.json({ ok: true, fixed: fixedCount, sessions: sessions.length, details });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 async function start() {
   try {
     await mongoose.connect(mongoUri);
@@ -1446,18 +1677,18 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     const { productId, retailerId, type, from, to, staffId, distributorId } = req.query;
     const filter = {};
     if (ctx.isAdmin) {
-      if (distributorId) filter.distributorId = distributorId;
+      if (distributorId && mongoose.Types.ObjectId.isValid(distributorId)) filter.distributorId = distributorId;
     } else {
       filter.distributorId = ctx.distributorId;
     }
     console.log('GET /api/my/stock-moves', { role: req.user.role, query: req.query, filter });
     // Allow staff to see all records, not just their own
-    if (staffId) filter.createdByStaffId = staffId;
+    if (staffId && mongoose.Types.ObjectId.isValid(staffId)) filter.createdByStaffId = staffId;
     
-    if (productId) filter.productId = productId;
-    if (retailerId) filter.retailerId = retailerId;
+    if (productId && mongoose.Types.ObjectId.isValid(productId)) filter.productId = productId;
+    if (retailerId && mongoose.Types.ObjectId.isValid(retailerId)) filter.retailerId = retailerId;
     const { supplierId } = req.query;
-    if (supplierId) filter.supplierId = supplierId;
+    if (supplierId && mongoose.Types.ObjectId.isValid(supplierId)) filter.supplierId = supplierId;
 
     if (type && ['IN', 'OUT'].includes(String(type))) filter.type = type;
     if (from || to) {
@@ -1473,7 +1704,10 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
       if (to) {
         const d = new Date(String(to));
         if (!isNaN(d.getTime())) {
-          if (String(to).length === 10) d.setUTCHours(23, 59, 59, 999);
+          if (String(to).length === 10) {
+            d.setMinutes(d.getMinutes() - 330);
+            d.setTime(d.getTime() + 86400000 - 1);
+          }
           filter.createdAt.$lte = d;
         }
       }
@@ -1491,9 +1725,10 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
         }
       })
       .sort({ createdAt: -1 });
-    console.log('Found transactions:', items.length);
+    console.log('Found stock moves:', items.length);
     res.json(items);
   } catch (err) {
+    console.error('Error listing stock moves:', err);
     res.status(500).json({ error: 'Failed to list stock moves' });
   }
 });
@@ -1522,26 +1757,16 @@ app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async 
 
     if (diff !== 0) {
       const inv = await Inventory.findOne({ distributorId, productId: move.productId });
-      
-      let change = 0;
-      if (move.type === 'IN') {
-          change = diff; 
-      } else {
-          change = -diff; 
-      }
-      
+      let change = move.type === 'IN' ? diff : -diff;
       if (!inv) {
-         if (move.type === 'IN') {
-            await Inventory.create({ distributorId, productId: move.productId, quantity: diff });
-         } else {
-             return res.status(400).json({ error: 'Inventory record missing' });
-         }
+         await Inventory.updateOne(
+           { distributorId, productId: move.productId },
+           { $inc: { quantity: change } },
+           { upsert: true }
+         );
       } else {
-          if (inv.quantity + change < 0) {
-              return res.status(400).json({ error: 'Insufficient inventory' });
-          }
-          inv.quantity += change;
-          await inv.save();
+         inv.quantity += change;
+         await inv.save();
       }
     }
 
@@ -1553,6 +1778,82 @@ app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update stock move' });
+  }
+});
+
+app.delete('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { distributorId } = getContext(req);
+    const move = await StockMove.findById(id);
+    if (!move) return res.status(404).json({ error: 'Move not found' });
+    if (String(move.distributorId) !== String(distributorId)) return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'staff') {
+      const p = req.user.permissions || [];
+      if (move.type === 'IN' && !p.includes('stock_in')) return res.status(403).json({ error: 'Permission denied' });
+      if (move.type === 'OUT' && !p.includes('stock_out')) return res.status(403).json({ error: 'Permission denied' });
+    }
+    const qty = Number(move.quantity)||0;
+    const delta = move.type === 'IN' ? -qty : qty; // reverse effect
+    await Inventory.updateOne(
+      { distributorId, productId: move.productId },
+      { $inc: { quantity: delta } },
+      { upsert: true }
+    );
+    await StockMove.deleteOne({ _id: move._id });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete stock move' });
+  }
+});
+
+// Retailer adjustment
+app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
+  try {
+    const { distributorId, staffId } = getContext(req);
+    const { retailerId, amount, note } = req.body;
+
+    if (!retailerId) return res.status(400).json({ error: 'Retailer required' });
+    const amt = Number(amount);
+    if (isNaN(amt) || amt === 0) return res.status(400).json({ error: 'Valid amount required' });
+
+    const retailer = await User.findOne({ _id: retailerId, distributorId, role: 'retailer' });
+    if (!retailer) return res.status(404).json({ error: 'Retailer not found' });
+
+    // Create transaction
+    await Transaction.create({
+      distributorId,
+      retailerId,
+      createdByStaffId: staffId,
+      type: 'adjustment',
+      amount: amt, // Store signed amount to indicate Debit (+) or Credit (-)
+      note: note || 'Balance Adjustment',
+      // We store amount as positive usually, but for adjustment it's tricky. 
+      // Transaction usually stores amount involved.
+      // However, we need to know if it's debit or credit. 
+      // Let's store signed amount? No, schema says Number.
+      // But typically 'order' adds to balance, 'payment' subtracts.
+      // 'adjustment' can do either.
+      // If we store signed amount, we might break existing assumption that amount is positive?
+      // Let's check how balance is calculated.
+      // Usually balance is calculated by summing orders and subtracting payments.
+      // For adjustment, if we want to add to balance (Debit), we treat it like order.
+      // If we want to subtract (Credit), we treat it like payment.
+      // But type is 'adjustment'.
+      // So we should probably allow negative amount in DB? Or use separate types 'adjustment_debit', 'adjustment_credit'?
+      // User asked for "adjustment entry".
+      // Let's check how User.currentBalance is updated.
+    });
+    
+    // Update retailer balance
+    // If amt is positive, we add to balance (Debit). If negative, we subtract (Credit).
+    await User.updateOne({ _id: retailerId }, { $inc: { currentBalance: amt } });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to record adjustment' });
   }
 });
 
@@ -1570,6 +1871,9 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
     // Allow staff to see all records, not just their own
     if (staffId) filter.createdByStaffId = staffId;
 
+    // if (retailerId) {
+    //    try { filter.retailerId = new mongoose.Types.ObjectId(String(retailerId)); } catch {}
+    // }
     if (retailerId) filter.retailerId = retailerId;
     if (type) filter.type = type;
     if (from || to) {
@@ -1594,10 +1898,43 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
       .populate('retailerId', 'name')
       .populate('createdByStaffId', 'name')
       .sort({ createdAt: -1 });
+    console.log('Found transactions:', items.length);
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list transactions' });
   }
+});
+
+app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
+    try {
+        const { distributorId } = getContext(req);
+        const { id } = req.params;
+        const { amount } = req.body;
+        
+        const txn = await Transaction.findOne({ _id: id, distributorId });
+        if(!txn) return res.status(404).json({ error: 'Transaction not found' });
+        
+        if(amount !== undefined) txn.amount = amount;
+        await txn.save();
+        
+        res.json({ success: true, transaction: txn });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.delete('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
+    try {
+        const { distributorId } = getContext(req);
+        const { id } = req.params;
+        
+        const txn = await Transaction.findOneAndDelete({ _id: id, distributorId });
+        if(!txn) return res.status(404).json({ error: 'Transaction not found' });
+        
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/api/my/supplier-transactions', auth, requireDistributorOrStaff(null), async (req, res) => {
@@ -1696,7 +2033,7 @@ app.get('/api/retailer/transactions', auth, requireRetailer, async (req, res) =>
 app.post('/api/my/stock-in', auth, requireDistributorOrStaff('stock_in'), async (req, res) => {
   try {
     const { distributorId, staffId } = getContext(req);
-    const { productId, quantity, note, supplierId } = req.body;
+    const { productId, quantity, note, supplierId, createdAt } = req.body;
     if (!productId || typeof quantity !== 'number') return res.status(400).json({ error: 'productId and quantity required' });
     if (quantity <= 0) return res.status(400).json({ error: 'quantity must be > 0' });
     const pid = new mongoose.Types.ObjectId(String(productId));
@@ -1707,20 +2044,39 @@ app.post('/api/my/stock-in', auth, requireDistributorOrStaff('stock_in'), async 
     if (supplierId) {
        try { sid = new mongoose.Types.ObjectId(String(supplierId)); } catch {}
     }
+    const date = createdAt ? new Date(String(createdAt)) : new Date();
 
     await Inventory.updateOne(
       { distributorId, productId: pid },
       { $inc: { quantity: quantity } },
       { upsert: true }
     );
+    
+    let price = 0;
+    const dr = await Rate.findOne({ distributorId, productId: pid });
+    if (dr) {
+       price = dr.price;
+       if(dr.history && dr.history.length > 0){
+           const sorted = [...dr.history].sort((a,b) => new Date(b.date) - new Date(a.date));
+           const match = sorted.find(h => new Date(h.date) <= date);
+           if(match) price = match.price;
+       }
+    }
+    else {
+      const gr = await GlobalRate.findOne({ productId: pid });
+      if(gr) price = gr.price;
+    }
+
     await StockMove.create({
       distributorId,
       productId: pid,
       type: 'IN',
       quantity,
+      price,
       note,
       supplierId: sid,
-      createdByStaffId: staffId
+      createdByStaffId: staffId,
+      createdAt: date
     });
     const current = await Inventory.findOne({ distributorId, productId: pid });
     res.json(current);
@@ -1781,28 +2137,257 @@ app.post('/api/my/suppliers/:id/bills', auth, requireDistributorOrStaff('stock_i
 app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
     const { distributorId, staffId } = getContext(req);
-    const { productId, quantity, retailerId, note } = req.body;
-    if (!productId || typeof quantity !== 'number' || !retailerId) return res.status(400).json({ error: 'productId, quantity, retailerId required' });
-    if (quantity <= 0) return res.status(400).json({ error: 'quantity must be > 0' });
-    const pid = new mongoose.Types.ObjectId(String(productId));
+    let { items, retailerId, note, createdAt } = req.body;
+    
+    // Support legacy single item request
+    if (!items && req.body.productId) {
+       items = [{ productId: req.body.productId, quantity: req.body.quantity }];
+    }
+    
+    if (!items || !items.length || !retailerId) return res.status(400).json({ error: 'items and retailerId required' });
+
     const rid = new mongoose.Types.ObjectId(String(retailerId));
-    const prod = await Product.findById(pid);
-    if (!prod) return res.status(404).json({ error: 'product not found' });
     const ret = await User.findOne({ _id: rid, role: 'retailer', distributorId });
     if (!ret) return res.status(404).json({ error: 'retailer not found' });
-    const inv = await Inventory.findOne({ distributorId, productId: pid });
-    const available = inv ? Number(inv.quantity) : 0;
-    if (available < quantity) return res.status(400).json({ error: 'insufficient stock' });
-    await Inventory.updateOne(
-      { distributorId, productId: pid },
-      { $inc: { quantity: -quantity } },
-      { upsert: true }
-    );
-    await StockMove.create({ distributorId, productId: pid, retailerId: rid, type: 'OUT', quantity, note, createdByStaffId: staffId });
-    const current = await Inventory.findOne({ distributorId, productId: pid });
-    res.json(current);
+
+    const date = createdAt ? new Date(createdAt) : new Date();
+    const orderItems = [];
+    let grandTotal = 0;
+    const stockMoves = [];
+
+    for (const item of items) {
+        const pid = new mongoose.Types.ObjectId(String(item.productId));
+        const qty = Number(item.quantity);
+        if (qty <= 0) continue;
+
+        const prod = await Product.findById(pid);
+        if (!prod) continue;
+
+        // Calculate Price FIRST
+        let pObj = await Product.findById(pid).populate('unit');
+        if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
+
+        let price = 0;
+        const rr = await RetailerRate.findOne({ distributorId, retailerId: rid, productId: pid });
+        if (rr) price = rr.price;
+        else {
+          const dr = await Rate.findOne({ distributorId, productId: pid });
+          if (dr) {
+             price = dr.price;
+             // Check history for date-effective price
+             if(dr.history && dr.history.length > 0){
+                 const sorted = [...dr.history].sort((a,b) => new Date(b.date) - new Date(a.date));
+                 const match = sorted.find(h => new Date(h.date) <= date);
+                 if(match) price = match.price;
+             }
+          }
+          else {
+            const gr = await GlobalRate.findOne({ productId: pid });
+            if(gr) price = gr.price;
+          }
+        }
+
+        // Inventory update (allow negative)
+        await Inventory.updateOne(
+          { distributorId, productId: pid },
+          { $inc: { quantity: -qty } },
+          { upsert: true }
+        );
+
+        // Create Stock Move
+        const sm = await StockMove.create({
+            distributorId,
+            productId: pid,
+            retailerId: rid,
+            type: 'OUT',
+            quantity: qty,
+            price: price,
+            note,
+            createdByStaffId: staffId,
+            createdAt: date
+        });
+        stockMoves.push(sm);
+
+        const u = pObj ? pObj.unit : null;
+        const isCompound = u && String(u.type) === 'Compound';
+        const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
+        let itemTotal = 0;
+        if(isCompound && conv > 0){
+           itemTotal = (price / conv) * qty;
+        } else {
+           itemTotal = price * qty;
+        }
+        
+        grandTotal += itemTotal;
+        orderItems.push({ productId: pid, quantity: qty, price });
+    }
+
+    if (orderItems.length === 0) return res.status(400).json({ error: 'No valid items' });
+
+    const start = new Date(date);
+    start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setUTCHours(23, 59, 59, 999);
+
+    let order = await Order.findOne({ retailerId: rid, distributorId, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: 1 });
+
+    if (order) {
+        order.items = (order.items || []).concat(orderItems);
+        order.totalAmount = Number(order.totalAmount || 0) + grandTotal;
+        if (note) order.note = note;
+        await order.save();
+
+        await User.findByIdAndUpdate(rid, { $inc: { currentBalance: grandTotal } });
+        const tx = await Transaction.findOne({ distributorId, retailerId: rid, type: 'order', referenceId: order._id });
+        if (tx) {
+            tx.amount = Number(tx.amount || 0) + grandTotal;
+            await tx.save();
+        } else {
+            await Transaction.create({ distributorId, retailerId: rid, type: 'order', amount: grandTotal, referenceId: order._id, note: note || 'Stock Out via Distributor App', createdByStaffId: staffId, createdAt: order.createdAt });
+        }
+    } else {
+        order = await Order.create({ retailerId: rid, distributorId, items: orderItems, totalAmount: grandTotal, status: 'delivered', note: note || 'Stock Out via Distributor App', createdAt: date });
+        await User.findByIdAndUpdate(rid, { $inc: { currentBalance: grandTotal } });
+        await Transaction.create({ distributorId, retailerId: rid, type: 'order', amount: grandTotal, referenceId: order._id, note: note || 'Stock Out via Distributor App', createdByStaffId: staffId, createdAt: date });
+    }
+
+    res.json({ ok: true, moves: stockMoves.length, orderId: order._id });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Failed to stock out' });
+  }
+});
+
+// Record stock wastage (OUT without retailer/supplier, no financials)
+app.post('/api/my/stock-wastage', auth, requireDistributorOrStaff('stock_out'), async (req, res) => {
+  try {
+    const { distributorId, staffId } = getContext(req);
+    const { items, note, createdAt } = req.body;
+    if (!items || !items.length) return res.status(400).json({ error: 'items required' });
+    const date = createdAt ? new Date(createdAt) : new Date();
+    let created = 0;
+    for (const item of items) {
+      const pid = new mongoose.Types.ObjectId(String(item.productId));
+      const qty = Number(item.quantity);
+      if (!pid || !qty || qty <= 0) continue;
+      await Inventory.updateOne(
+        { distributorId, productId: pid },
+        { $inc: { quantity: -qty } },
+        { upsert: true }
+      );
+      await StockMove.create({
+        distributorId,
+        productId: pid,
+        type: 'OUT',
+        quantity: qty,
+        note: note || 'WASTAGE',
+        createdByStaffId: staffId,
+        createdAt: date
+      });
+      created++;
+    }
+    if (created === 0) return res.status(400).json({ error: 'No valid items' });
+    res.json({ ok: true, moves: created });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to record wastage' });
+  }
+});
+
+// Record stock OUT to supplier (returns/supplies), no financials
+app.post('/api/my/stock-out-supplier', auth, requireDistributorOrStaff('stock_in'), async (req, res) => {
+  try {
+    const { distributorId, staffId } = getContext(req);
+    const { supplierId, items, note, createdAt } = req.body;
+    if (!supplierId) return res.status(400).json({ error: 'supplierId required' });
+    if (!items || !items.length) return res.status(400).json({ error: 'items required' });
+    const sid = new mongoose.Types.ObjectId(String(supplierId));
+    const sup = await Supplier.findOne({ _id: sid, distributorId });
+    if (!sup) {
+      // Diagnostic check
+      const exists = await Supplier.findById(sid);
+      if(exists) {
+         return res.status(404).json({ error: `supplier found but distId mismatch (req: ${distributorId}, db: ${exists.distributorId})` });
+      }
+      return res.status(404).json({ error: `supplier not found (id: ${sid})` });
+    }
+    const rawCreatedAt = createdAt;
+    const date = rawCreatedAt ? new Date(rawCreatedAt) : new Date();
+    const dayKey =
+      typeof rawCreatedAt === 'string' && rawCreatedAt.length >= 10
+        ? rawCreatedAt.slice(0, 10)
+        : date.toISOString().split('T')[0];
+
+    let startOfDay;
+    let endOfDay;
+    if (typeof rawCreatedAt === 'string' && rawCreatedAt.length === 10) {
+      const d = new Date(dayKey);
+      d.setMinutes(d.getMinutes() - 330);
+      startOfDay = d;
+      endOfDay = new Date(d);
+      endOfDay.setTime(d.getTime() + 86400000 - 1);
+    } else {
+      startOfDay = new Date(date);
+      startOfDay.setUTCHours(0, 0, 0, 0);
+      endOfDay = new Date(date);
+      endOfDay.setUTCHours(23, 59, 59, 999);
+    }
+
+    let created = 0;
+    for (const item of items) {
+      const pid = new mongoose.Types.ObjectId(String(item.productId));
+      const qty = Number(item.quantity);
+      if (!pid || isNaN(qty) || qty < 0) continue;
+
+      const match = {
+        distributorId,
+        supplierId: sid,
+        productId: pid,
+        type: 'OUT',
+        $or: [{ dayKey }, { createdAt: { $gte: startOfDay, $lte: endOfDay } }],
+      };
+
+      const existingMoves = await StockMove.find(match).select({ _id: 1, quantity: 1 });
+      const oldTotal = existingMoves.reduce((sum, m) => sum + (Number(m.quantity) || 0), 0);
+      const diff = qty - oldTotal;
+
+      if (diff !== 0) {
+        await Inventory.updateOne(
+          { distributorId, productId: pid },
+          { $inc: { quantity: -diff } },
+          { upsert: true }
+        );
+      }
+
+      if (existingMoves.length > 0) {
+        await StockMove.deleteMany({ _id: { $in: existingMoves.map((m) => m._id) } });
+      }
+
+      if (qty > 0) {
+        await StockMove.create({
+          distributorId,
+          productId: pid,
+          supplierId: sid,
+          dayKey,
+          type: 'OUT',
+          quantity: qty,
+          note: note || 'OUT TO SUPPLIER',
+          createdByStaffId: staffId,
+          createdAt: startOfDay,
+        });
+      }
+
+      if (diff !== 0 || existingMoves.length > 0) created++;
+    }
+    // If we processed items (even clearings), return success
+    if (created === 0 && items.length > 0) {
+       // It's possible all items were "no change", so just return success
+       return res.json({ ok: true, moves: 0, message: 'No changes detected' });
+    }
+    res.json({ ok: true, moves: created });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to stock out to supplier' });
   }
 });
 
@@ -1859,6 +2444,86 @@ app.post('/api/my/transactions', auth, requireDistributorOrStaff(null), async (r
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create transaction' });
+  }
+});
+
+app.post('/api/my/recompute-order', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId, staffId } = getContext(req);
+    const { retailerId, date } = req.body;
+    if (!retailerId || !date) return res.status(400).json({ error: 'retailerId and date required' });
+    const rid = new mongoose.Types.ObjectId(String(retailerId));
+    const ret = await User.findOne({ _id: rid, role: 'retailer', distributorId });
+    if (!ret) return res.status(404).json({ error: 'retailer not found' });
+
+    const d = new Date(String(date));
+    const start = new Date(d); start.setUTCHours(0,0,0,0);
+    const end = new Date(d); end.setUTCHours(23,59,59,999);
+
+    const moves = await StockMove.find({ distributorId, retailerId: rid, type: 'OUT', createdAt: { $gte: start, $lte: end } }).populate({ path: 'productId', populate: { path: 'unit' } });
+    const byProd = new Map();
+    for (const m of moves) {
+      const pid = m.productId?._id || m.productId;
+      const qty = Number(m.quantity)||0;
+      byProd.set(String(pid), (byProd.get(String(pid))||0) + qty);
+    }
+    const items = [];
+    let grandTotal = 0;
+    for (const [pidStr, qty] of byProd.entries()) {
+      const pid = new mongoose.Types.ObjectId(pidStr);
+      let pObj = await Product.findById(pid).populate('unit');
+      if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
+      const u = pObj ? pObj.unit : null;
+      const isCompound = u && String(u.type) === 'Compound';
+      const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
+      let price = 0;
+      const rr = await RetailerRate.findOne({ distributorId, retailerId: rid, productId: pid });
+      if (rr) price = rr.price; else {
+        const dr = await Rate.findOne({ distributorId, productId: pid });
+        if (dr) {
+           price = dr.price;
+           // Check history for date-effective price
+           if(dr.history && dr.history.length > 0){
+               const sorted = [...dr.history].sort((a,b) => new Date(b.date) - new Date(a.date));
+               const match = sorted.find(h => new Date(h.date) <= d); // d is the date of recompute
+               if(match) price = match.price;
+           }
+        } else {
+          const gr = await GlobalRate.findOne({ productId: pid }); if(gr) price = gr.price;
+        }
+      }
+      items.push({ productId: pid, quantity: qty, price });
+      if(isCompound && conv > 0) grandTotal += (price / conv) * qty; else grandTotal += price * qty;
+    }
+
+    let order = await Order.findOne({ retailerId: rid, distributorId, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: 1 });
+    let delta = 0;
+    if (order) {
+      const prev = Number(order.totalAmount)||0;
+      order.items = items;
+      order.totalAmount = grandTotal;
+      order.status = 'delivered';
+      await order.save();
+      const tx = await Transaction.findOne({ distributorId, retailerId: rid, type: 'order', referenceId: order._id });
+      if (tx) {
+        delta = grandTotal - Number(tx.amount||0);
+        tx.amount = grandTotal;
+        await tx.save();
+      } else {
+        delta = grandTotal;
+        await Transaction.create({ distributorId, retailerId: rid, type: 'order', amount: grandTotal, referenceId: order._id, createdByStaffId: staffId, createdAt: order.createdAt });
+      }
+    } else {
+      order = await Order.create({ retailerId: rid, distributorId, items, totalAmount: grandTotal, status: 'delivered', createdAt: start });
+      await Transaction.create({ distributorId, retailerId: rid, type: 'order', amount: grandTotal, referenceId: order._id, createdByStaffId: staffId, createdAt: order.createdAt });
+      delta = grandTotal;
+    }
+
+    if (delta !== 0) await User.findByIdAndUpdate(rid, { $inc: { currentBalance: delta } });
+    res.json({ ok: true, itemsCount: items.length, grandTotal, delta, orderId: order._id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to recompute order' });
   }
 });
 
@@ -1923,6 +2588,19 @@ app.post('/api/my/retailers/:id/rates', auth, requireDistributor, async (req, re
   }
 });
 
+app.get('/api/my/rates/history', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { productId } = req.query;
+    const { distributorId } = getContext(req);
+    const filter = { distributorId };
+    if (productId) filter.productId = productId;
+    const rates = await Rate.find(filter).populate('productId', 'nameEnglish nameHindi');
+    res.json(rates);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch rate history' });
+  }
+});
+
 app.get('/api/my/rates', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
     const { distributorId } = getContext(req);
@@ -1935,21 +2613,34 @@ app.get('/api/my/rates', auth, requireDistributorOrStaff(null), async (req, res)
 
 app.post('/api/my/rates', auth, requireDistributor, async (req, res) => {
   try {
-    const { productId, price } = req.body;
+    const { productId, price, effectiveDate } = req.body;
     if (!productId || typeof price !== 'number') return res.status(400).json({ error: 'productId and price required' });
     const pid = new mongoose.Types.ObjectId(String(productId));
-    const existing = await Rate.findOne({ productId: pid, distributorId: req.user._id });
+    const date = effectiveDate ? new Date(effectiveDate) : new Date();
+
+    let existing = await Rate.findOne({ productId: pid, distributorId: req.user._id });
     if (existing) {
-      existing.price = price;
+      existing.history.push({ date, price });
+      existing.history.sort((a, b) => b.date - a.date);
+      const now = new Date();
+      const current = existing.history.find(h => h.date <= now) || existing.history[0];
+      existing.price = current.price;
       await existing.save();
       return res.json(existing);
     }
-    const created = await Rate.create({ productId: pid, distributorId: req.user._id, price });
+    const created = await Rate.create({ 
+      productId: pid, 
+      distributorId: req.user._id, 
+      price,
+      history: [{ date, price }]
+    });
     res.status(201).json(created);
   } catch (err) {
     res.status(500).json({ error: 'Failed to set rate' });
   }
 });
+
+
 
 // Admin reports: stock moves
 app.get('/api/admin/stock-moves', auth, requireAdmin, async (req, res) => {

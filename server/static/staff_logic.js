@@ -14,7 +14,7 @@ async function loadStaff() {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${s.name}</td>
-        <td>${s.email}</td>
+        <td>${s.phone || '-'}</td>
         <td><span class="badge bg-secondary">${s.role}</span></td>
         <td>
           <button class="btn btn-sm btn-outline-primary me-1" onclick="editStaff('${s._id}')"><i class="bi bi-pencil"></i></button>
@@ -34,8 +34,8 @@ function bindStaffForm() {
 function prepareAddStaff() {
   qs('#staffId').value = '';
   qs('#staffName').value = '';
-  qs('#staffEmail').value = '';
-  qs('#staffEmail').disabled = false;
+  qs('#staffPhone').value = '';
+  qs('#staffPhone').disabled = false;
   qs('#staffPassword').value = '';
   qs('#staffPassword').placeholder = 'Password';
   qsa('.staff-perm').forEach(c => c.checked = false);
@@ -51,8 +51,8 @@ async function editStaff(id) {
     
     qs('#staffId').value = s._id;
     qs('#staffName').value = s.name;
-    qs('#staffEmail').value = s.email;
-    qs('#staffEmail').disabled = true;
+    qs('#staffPhone').value = s.phone || '';
+    qs('#staffPhone').disabled = false;
     qs('#staffPassword').value = '';
     qs('#staffPassword').placeholder = 'Leave blank to keep current';
     
@@ -63,7 +63,7 @@ async function editStaff(id) {
     qs('#staffDeleteBtn').classList.remove('d-none');
     qs('.modal-title', '#staffModal').textContent = 'Edit Staff';
     
-    const m = new bootstrap.Modal(qs('#staffModal'));
+    const m = bootstrap.Modal.getOrCreateInstance(qs('#staffModal'));
     m.show();
   } catch (e) { alert(e.message); }
 }
@@ -71,18 +71,18 @@ async function editStaff(id) {
 async function saveStaff() {
   const id = qs('#staffId').value;
   const name = qs('#staffName').value;
-  const email = qs('#staffEmail').value;
+  const phone = qs('#staffPhone').value;
   const password = qs('#staffPassword').value;
   const permissions = [];
   qsa('.staff-perm').forEach(c => { if (c.checked) permissions.push(c.value); });
 
-  if (!name || (!id && !email) || (!id && !password)) {
-    alert('Name, Email and Password are required for new staff');
+  if (!name || (!id && !phone) || (!id && !password)) {
+    alert('Name, Phone and Password are required for new staff');
     return;
   }
 
   const body = { name, permissions };
-  if (email) body.email = email;
+  if (phone) body.phone = phone;
   if (password) body.password = password;
 
   try {

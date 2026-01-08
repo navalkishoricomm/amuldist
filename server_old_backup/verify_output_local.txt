@@ -1,0 +1,68 @@
+[dotenv@17.2.3] injecting env (3) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+Units found: [
+  {
+    "_id": "68a05ede1aa07bbc34aaca5a",
+    "type": "Simple",
+    "symbol": "MCT"
+  },
+  {
+    "_id": "68a1b2f4ea019073c382e972",
+    "type": "Compound",
+    "symbol": "MCT/Kg"
+  },
+  {
+    "_id": "68a2b1ba4b7181b6c608e931",
+    "type": "Compound",
+    "symbol": "MCT/Box"
+  },
+  {
+    "_id": "68a2b1cb4b7181b6c608e937",
+    "type": "Compound",
+    "symbol": "MCT/Box"
+  },
+  {
+    "_id": "68a2c4c6440962a09d36cf98",
+    "type": "Compound",
+    "symbol": "MCT/Kg"
+  },
+  {
+    "_id": "68a562bf5f1f64d31750c405",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a493db0f16c9aff95cc51a",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a8220dd25c0f0e6ef143af",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a8221ad25c0f0e6ef143b5",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a82260d25c0f0e6ef143c1",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a824b513257fc97ea10244",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a8250713257fc97ea1024a",
+    "type": "Compound",
+    "symbol": "MCT/Pcs"
+  },
+  {
+    "_id": "68a8222dd25c0f0e6ef143bb",
+    "type": "Compound",
+    "symbol": "MCT/Box"
+  }
+]

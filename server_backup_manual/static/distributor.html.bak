@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Distributor Dashboard • AmulDist</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/ui/styles.css" />
+  <style>
+    .nav-link { color: #6c757d; }
+    .nav-link.active { color: #0d6efd; font-weight: bold; }
+    .scroll-section { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .navbar { padding-top: .25rem; padding-bottom: .25rem; }
+    .navbar-brand { font-size: 1rem; }
+    .navbar .navbar-toggler { padding: .15rem .4rem; }
+    .offcanvas-title { font-size: 1rem; }
+    .offcanvas { --bs-offcanvas-height: 50vh; }
+    .offcanvas-end { --bs-offcanvas-width: 50vw; }
+    .offcanvas .nav-link { padding: .25rem .5rem; }
+    @media (max-width: 360px) {
+      .col-stock { display: none !important; }
+      .sm-hide { display: none !important; }
+      #tab-stock-in .table .input-group.input-group-sm,
+      #tab-stock-out .table .input-group.input-group-sm { flex-wrap: nowrap; }
+      #tab-stock-in .table .input-group.input-group-sm .form-control.qty-narrow,
+      #tab-stock-out .table .input-group.input-group-sm .form-control.qty-narrow { width: 64px; padding: .125rem .25rem; }
+      #tab-stock-in .table .input-group.input-group-sm .input-group-text,
+      #tab-stock-out .table .input-group.input-group-sm .input-group-text { padding: .125rem .25rem; font-size: .75rem; }
+      #tab-stock-in .table td, #tab-stock-in .table th,
+      #tab-stock-out .table td, #tab-stock-out .table th { padding: 0.25rem; }
+    }
+  </style>
+</head>
+<body style="padding-top: 0; background-color: #f8f9fa;">
+  
+  <div class="container-fluid px-0">
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3 sticky-top">
+      <div class="container-fluid">
+        <a id="navbarBrand" class="navbar-brand fw-bold" href="#">Distributor Dashboard</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasNavbar">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="offcanvas offcanvas-end" tabindex="-1" id="offcanvasNavbar" data-bs-scroll="true" data-bs-backdrop="false">
+          <div class="offcanvas-header">
+            <h5 class="offcanvas-title fw-bold">Menu</h5>
+            <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas"></button>
+          </div>
+          <div class="offcanvas-body">
+            <ul class="navbar-nav justify-content-end flex-grow-1 pe-3">
+              <li class="nav-item">
+                <button id="nav-dashboard" class="nav-link w-100 text-start active" data-bs-target="#tab-dashboard" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-speedometer2 me-2"></i> Dashboard
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-products" class="nav-link w-100 text-start" data-bs-target="#tab-products" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-box-seam me-2"></i> Products
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-inventory" class="nav-link w-100 text-start" data-bs-target="#tab-inventory" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-boxes me-2"></i> Inventory
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-stock-in" class="nav-link w-100 text-start" data-bs-target="#tab-stock-in" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-download me-2"></i> Stock In
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-stock-out" class="nav-link w-100 text-start" data-bs-target="#tab-stock-out" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-upload me-2"></i> Stock Out
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-rates" class="nav-link w-100 text-start" data-bs-target="#tab-rates" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-currency-rupee me-2"></i> Rates
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-retailers" class="nav-link w-100 text-start" data-bs-target="#tab-retailers" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-people me-2"></i> Retailers
+                </button>
+              </li>
+              <li class="nav-item">
+                <button id="nav-reports" class="nav-link w-100 text-start" data-bs-target="#tab-reports" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-clipboard-data me-2"></i> Reports
+                </button>
+              </li>
+              <li class="nav-item">
+                 <button id="nav-staff" class="nav-link w-100 text-start" data-bs-target="#tab-staff" data-bs-dismiss="offcanvas">
+                    <i class="bi bi-person-badge me-2"></i> Staff
+                 </button>
+              </li>
+              <li class="nav-item mt-3 border-top pt-3">
+                 <button id="logoutBtn" class="nav-link w-100 text-start text-danger">
+                    <i class="bi bi-box-arrow-right me-2"></i> Logout
+                 </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container pb-5">
+
+
+    <div class="tab-content" id="mainTabContent">
+      <!-- Dashboard Tab -->
+      <div class="tab-pane fade show active" id="tab-dashboard" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          
+          <!-- Stats Row -->
+          <div class="col-12">
+            <div class="row g-2 mb-2">
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0" onclick="switchTab('tab-inventory')" style="cursor:pointer">
+                    <div class="text-muted small">Inventory</div>
+                    <div id="dStatInventory" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0" onclick="switchTab('tab-inventory')" style="cursor:pointer">
+                    <div class="text-muted small">Low Stock</div>
+                    <div id="dStatLowStock" class="fw-bold fs-4 text-danger">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0" onclick="switchTab('tab-retailers')" style="cursor:pointer">
+                    <div class="text-muted small">Retailers</div>
+                    <div id="dStatRetailers" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+              <div class="col-6 col-md-3">
+                 <div class="card p-2 text-center shadow-sm border-0" onclick="openDailyReport()" style="cursor:pointer">
+                    <div class="text-muted small">Today's Orders</div>
+                    <div id="dStatOrders" class="fw-bold fs-4">0</div>
+                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="fw-bold mb-2">Quick Actions</div>
+            <div class="row g-2">
+               <div id="qa-products" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-products')" style="cursor:pointer">
+                    <i class="bi bi-box-seam fs-1 text-primary mb-1"></i>
+                    <div class="small fw-bold">Products</div>
+                 </div>
+               </div>
+               <div id="qa-inventory" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-inventory')" style="cursor:pointer">
+                    <i class="bi bi-boxes fs-1 text-success mb-1"></i>
+                    <div class="small fw-bold">Inventory</div>
+                 </div>
+               </div>
+               <div id="qa-stock-in" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-stock-in')" style="cursor:pointer">
+                    <i class="bi bi-download fs-1 text-success mb-1"></i>
+                    <div class="small fw-bold">Stock In</div>
+                 </div>
+               </div>
+               <div id="qa-stock-out" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-stock-out')" style="cursor:pointer">
+                    <i class="bi bi-upload fs-1 text-danger mb-1"></i>
+                    <div class="small fw-bold">Stock Out</div>
+                 </div>
+               </div>
+               <div id="qa-rates" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-rates')" style="cursor:pointer">
+                    <i class="bi bi-currency-rupee fs-1 text-warning mb-1"></i>
+                    <div class="small fw-bold">Rates</div>
+                 </div>
+               </div>
+               <div id="qa-retailers" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-retailers')" style="cursor:pointer">
+                    <i class="bi bi-people fs-1 text-info mb-1"></i>
+                    <div class="small fw-bold">Retailers</div>
+                 </div>
+               </div>
+               <div id="qa-reports" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-reports')" style="cursor:pointer">
+                    <i class="bi bi-clipboard-data fs-1 text-danger mb-1"></i>
+                    <div class="small fw-bold">Reports</div>
+                 </div>
+               </div>
+               <div id="qa-staff" class="col-4 col-md-2">
+                 <div class="card p-2 text-center h-100 shadow-sm border-0" onclick="switchTab('tab-staff')" style="cursor:pointer">
+                    <i class="bi bi-person-badge fs-1 text-secondary mb-1"></i>
+                    <div class="small fw-bold">Staff</div>
+                 </div>
+               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Products Tab -->
+      <div class="tab-pane fade" id="tab-products" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Product Master</div>
+                <div class="d-flex align-items-center gap-2">
+                  <button class="btn btn-outline-secondary btn-sm" onclick="renderDistProductsGrid('#distProdGrid')"><i class="bi bi-arrow-repeat"></i></button>
+                </div>
+              </div>
+              <div class="d-flex gap-2 mb-2">
+                 <input id="distProdName" class="form-control form-control-sm flex-grow-1" placeholder="Product name" />
+                 <div class="input-group input-group-sm" style="width:70px; flex-shrink:0;">
+                   <select id="distUnit" class="form-select" style="font-size:0.7rem; padding:0.1rem 0.1rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;"></select>
+                   <button id="distUnitInfo" class="btn btn-outline-secondary" type="button" title="Unit Details" style="padding:0.1rem 0.1rem;"><i class="bi bi-info-circle"></i></button>
+                 </div>
+                 <button id="distProdAdd" class="btn btn-sm btn-primary"><i class="bi bi-plus"></i> Add</button>
+              </div>
+              <div id="distProdGrid" class="grid scroll-section" style="max-height:60vh"></div>
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="fw-bold">Hidden (Global)</div>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="renderHiddenProducts('#hiddenProdList')"><i class="bi bi-eye"></i> Show</button>
+                </div>
+                <div id="hiddenProdList" class="grid scroll-section" style="max-height:40vh"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Retailers Tab -->
+      <div class="tab-pane fade" id="tab-retailers" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 h-100 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Retailers</div>
+                <button id="addRetailerBtn" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#retModal"><i class="bi bi-plus"></i> Add</button>
+              </div>
+              <ul id="retList" class="list-group scroll-section" style="max-height: 70vh;"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      
+
+      <!-- Stock In Tab -->
+      <div class="tab-pane fade" id="tab-stock-in" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Stock In</div>
+                <button class="btn btn-outline-secondary btn-sm" onclick="renderStockIn()"><i class="bi bi-arrow-repeat"></i></button>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded">
+                <div class="flex-grow-1">
+                  <label class="form-label mb-0 small fw-bold">Date</label>
+                  <input type="date" id="stockInDate" class="form-control form-control-sm">
+                </div>
+                <div class="flex-grow-1">
+                  <label class="form-label mb-0 small fw-bold">Supplier</label>
+                  <div class="input-group input-group-sm">
+                    <select id="stockInSupplierSel" class="form-select"></select>
+                    <button class="btn btn-outline-primary" onclick="addSupplierPrompt()"><i class="bi bi-plus"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div class="table-responsive" style="max-height: 60vh; overflow-y: auto;">
+                <table class="table table-sm table-hover align-middle">
+                  <thead class="table-light sticky-top">
+                    <tr>
+                      <th style="width: 40%">Product</th>
+                      <th style="width: 15%" class="text-center col-stock">Cur</th>
+                      <th style="width: 45%">In Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody id="stockInRows"></tbody>
+                </table>
+              </div>
+              <div class="row g-2 mt-2">
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-0 small text-muted">Subtotal</label>
+                  <div id="stockInSubtotal" class="fw-bold">₹0</div>
+                </div>
+                <div class="col-6 col-md-4">
+                  <label class="form-label mb-0 small">Bill Amount</label>
+                  <input id="stockInBillAmt" type="number" class="form-control form-control-sm" min="0" value="0">
+                </div>
+                <div class="col-6 col-md-4">
+                  <label class="form-label mb-0 small">Supplier Balance</label>
+                  <div id="stockInSupBalance" class="fw-bold text-danger">₹0</div>
+                </div>
+                <div class="col-6 col-md-6">
+                  <label class="form-label mb-0 small">Cash</label>
+                  <input id="stockInCash" type="number" class="form-control form-control-sm" min="0" value="0">
+                </div>
+                <div class="col-6 col-md-6">
+                  <label class="form-label mb-0 small">Online</label>
+                  <input id="stockInOnline" type="number" class="form-control form-control-sm" min="0" value="0">
+                </div>
+              </div>
+              <div class="mt-3 text-end border-top pt-3">
+                <button id="stockInSaveBtn" class="btn btn-success w-100"><i class="bi bi-download"></i> Save Stock In & Payments</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stock Out Tab -->
+      <div class="tab-pane fade" id="tab-stock-out" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Stock Out</div>
+                <div class="d-flex align-items-center gap-3">
+                  <div class="small text-muted">Balance: <span id="stockOutCurBalance" class="fw-bold">₹0</span></div>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="renderStockOut()"><i class="bi bi-arrow-repeat"></i></button>
+                </div>
+              </div>
+              <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded">
+                <div class="flex-grow-1">
+                  <label class="form-label mb-0 small fw-bold">Retailer</label>
+                  <select id="stockOutRetailerSel" class="form-select form-select-sm"></select>
+                </div>
+              </div>
+              <div class="table-responsive" style="max-height: 60vh; overflow-y: auto;">
+                <table class="table table-sm table-hover align-middle">
+                  <thead class="table-light sticky-top">
+                    <tr>
+                      <th style="width: 40%">Product</th>
+                      <th style="width: 35%">Out Qty</th>
+                      <th style="width: 25%" class="text-end">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody id="stockOutRows"></tbody>
+                </table>
+              </div>
+              <div class="row g-2 mt-2">
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-0 small text-muted">Subtotal</label>
+                  <div id="stockOutSubtotal" class="fw-bold">₹0</div>
+                </div>
+                <div class="col-6 col-md-4">
+                  <label class="form-label mb-0 small">Cash</label>
+                  <input id="stockOutCash" type="number" class="form-control form-control-sm" min="0" value="0">
+                </div>
+                <div class="col-6 col-md-4">
+                  <label class="form-label mb-0 small">Online</label>
+                  <input id="stockOutOnline" type="number" class="form-control form-control-sm" min="0" value="0">
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label mb-0 small text-muted">Receivable</label>
+                  <div id="stockOutReceivable" class="fw-bold">₹0</div>
+                </div>
+              </div>
+              <div id="stockOutBalances" class="mt-2 small text-muted"></div>
+              <div class="mt-3 text-end border-top pt-3">
+                <button id="stockOutSaveBtn" class="btn btn-danger w-100"><i class="bi bi-upload"></i> Save Stock Out & Payments</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inventory Tab (Status Only) -->
+      <div class="tab-pane fade" id="tab-inventory" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Current Stock Status</div>
+                <button class="btn btn-outline-secondary btn-sm" onclick="renderInventoryStatus()"><i class="bi bi-arrow-repeat"></i></button>
+              </div>
+              <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                <table class="table table-sm table-hover align-middle">
+                  <thead class="table-light sticky-top">
+                    <tr>
+                      <th>Product</th>
+                      <th class="text-end">Quantity</th>
+                    </tr>
+                  </thead>
+                  <tbody id="invStatusRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rates Tab -->
+      <div class="tab-pane fade" id="tab-rates" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 h-100 shadow-sm border-0">
+              <div class="fw-bold mb-2">Rates Management</div>
+                <div class="mb-2">
+                  <select id="rateRetailerSel" class="form-select form-select-sm" onchange="renderRatesTable()">
+                    <option value="">Loading...</option>
+                  </select>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle">
+                    <thead>
+                      <tr id="rateHeaderRow">
+                        <th>Product</th>
+                        <th style="width:120px">Default Price</th>
+                        <th style="width:120px">Retailer Price</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rateRows"></tbody>
+                  </table>
+                </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reports Tab -->
+      <div class="tab-pane fade" id="tab-reports" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0" id="reportSection">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Reports</div>
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-12">
+                  <select id="repCategory" class="form-select form-select-sm fw-bold bg-light">
+                    <option value="">Select Report Type...</option>
+                    <option value="stock">Stock Report</option>
+                    <option value="product_wise">Product Wise Report</option>
+                    <option value="financial">Financial Report</option>
+                    <option value="retailer_ledger">Retailer Ledger</option>
+                    <option value="supplier_ledger">Supplier Ledger</option>
+                  </select>
+                </div>
+                <div class="col-12"><input id="repSearch" class="form-control form-control-sm" placeholder="Search..." /></div>
+                <div class="col-6 d-none" id="repTypeDiv"><select id="repTypeSel" class="form-select form-select-sm"><option value="">All Types</option></select></div>
+                <div class="col-6 d-none" id="repStaffDiv"><select id="repStaffSel" class="form-select form-select-sm"><option value="">All Staff</option></select></div>
+                <div class="col-6 d-none" id="repProductDiv"><select id="repProductSel" class="form-select form-select-sm"></select></div>
+                <div class="col-12 d-none" id="repRetailerDiv"><select id="repRetailerSel" class="form-select form-select-sm"></select></div>
+                <div class="col-12 d-none" id="repSupplierDiv"><select id="repSupplierSel" class="form-select form-select-sm"><option value="">All suppliers</option></select></div>
+                <div class="col-6"><input id="repFromDate" type="date" class="form-control form-control-sm" /></div>
+                <div class="col-6"><input id="repToDate" type="date" class="form-control form-control-sm" /></div>
+                <div class="col-12 text-end d-none" id="repActionDiv">
+                  <button id="repGenerateBtn" class="btn btn-primary btn-sm"><i class="bi bi-play-fill"></i> Generate</button>
+                  <button id="repExportBtn" class="btn btn-outline-primary btn-sm ms-2"><i class="bi bi-filetype-csv"></i> Export</button>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm small">
+                  <thead id="repThead"><tr><th>Date</th><th>T</th><th>Prod</th><th>Ret</th><th class="text-end">Qty</th></tr></thead>
+                  <tbody id="repRows"></tbody>
+                </table>
+              </div>
+              <div class="text-muted small mt-2"><span id="repCount">0</span> moves</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Staff Tab -->
+      <div class="tab-pane fade" id="tab-staff" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Staff Management</div>
+                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#staffModal" onclick="prepareAddStaff()"><i class="bi bi-plus"></i> Add Staff</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+                  <tbody id="staffList"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+  </div>
+</div>
+</div>
+
+  <!-- Modal -->
+  <div class="modal fade" id="retModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Add Retailer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">Name</label><input id="retName" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Phone</label><input id="retPhone" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Address</label><input id="retAddress" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Opening balance</label><input id="retBalance" type="number" class="form-control" /></div>
+        </div>
+        <div class="modal-footer"><button id="retSave" class="btn btn-primary" data-bs-dismiss="modal">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Modal -->
+  <div class="modal fade" id="paymentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Record Payment</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+                  <input type="hidden" id="payRetailerId" />
+                  <div class="mb-2 fw-bold" id="payRetailerName"></div>
+                  <div class="mb-2 small text-muted">Current Balance: <span id="payCurrentBalance" class="fw-bold text-dark">₹0.00</span></div>
+                  <div class="mb-2"><label class="form-label">Amount (₹)</label><input id="payAmount" type="number" class="form-control" /></div>
+          <div class="mb-2">
+            <label class="form-label">Type</label>
+            <select id="payType" class="form-select">
+              <option value="payment_cash">Cash</option>
+              <option value="payment_online">Online</option>
+            </select>
+          </div>
+          <div class="mb-2"><label class="form-label">Note</label><input id="payNote" class="form-control" placeholder="Optional" /></div>
+        </div>
+        <div class="modal-footer"><button id="paySave" class="btn btn-success" data-bs-dismiss="modal">Record Payment</button></div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Ledger Modal -->
+  <div class="modal fade" id="ledgerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Ledger History</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body p-0">
+          <div class="p-3 bg-light border-bottom">
+            <div class="fw-bold fs-5" id="ledgerRetailerName"></div>
+            <div class="text-muted">Current Balance: <span id="ledgerBalance" class="fw-bold"></span></div>
+          </div>
+          <div class="table-responsive" style="max-height: 50vh;">
+            <table class="table table-sm table-striped mb-0">
+              <thead class="sticky-top bg-white"><tr><th>Date</th><th>Type</th><th class="text-end">Amount</th></tr></thead>
+              <tbody id="ledgerRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Staff Modal -->
+  <div class="modal fade" id="staffModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Manage Staff</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="staffId" />
+          <div class="mb-2"><label class="form-label">Name</label><input id="staffName" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Email</label><input id="staffEmail" type="email" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Password</label><input id="staffPassword" type="password" class="form-control" placeholder="Leave blank to keep current" /></div>
+          <div class="mb-2">
+            <label class="form-label">Permissions</label>
+            <div class="form-check">
+              <input class="form-check-input staff-perm" type="checkbox" value="stock_in" id="permStockIn">
+              <label class="form-check-label" for="permStockIn">Stock IN</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input staff-perm" type="checkbox" value="stock_out" id="permStockOut">
+              <label class="form-check-label" for="permStockOut">Stock Out</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input staff-perm" type="checkbox" value="payment_cash" id="permCashIn">
+              <label class="form-check-label" for="permCashIn">Cash IN</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input staff-perm" type="checkbox" value="payment_online" id="permOnlineIn">
+              <label class="form-check-label" for="permOnlineIn">Online Payment IN</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input staff-perm" type="checkbox" value="add_retailer" id="permAddRetailer">
+              <label class="form-check-label" for="permAddRetailer">Add Retailer</label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="staffDeleteBtn" class="btn btn-danger d-none" onclick="deleteStaff()">Delete</button>
+          <button id="staffSaveBtn" class="btn btn-primary" onclick="saveStaff()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="unitDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Unit Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <table class="table table-bordered mb-0">
+            <tbody id="unitDetailTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <div id="notifyArea" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
+  <script src="/ui/app.js?v=35"></script>
+  <script>
+    // Failsafe: if app.js didn't init properly, try manually
+    window.onload = function() {
+      setTimeout(() => {
+        if (!window.switchTab && typeof loadDistributor === 'function') {
+           loadDistributor();
+        } else if (window.switchTab && !document.querySelector('.tab-pane.active')) {
+           window.switchTab('tab-dashboard');
+        }
+      }, 500);
+    };
+  </script>
+</body>
+</html>

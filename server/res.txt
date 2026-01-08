@@ -1,0 +1,71 @@
+Connected to DB
+Found 5 distributors.
+
+Checking Distributor: Dist One (693d49ecc4d492a78dbd0e1a)
+Inventory Collection has 2 items.
+  [INV] दही कप 200 ग्राम: 50
+  [INV] बिंदास चॉकलेट: 6
+StockMove Aggregation (Non-zero):
+  [MOVE] दही कप 200 ग्राम: 50
+  [MOVE] बिंदास चॉकलेट: 6
+
+Checking Distributor: Distributor Demo (693d4eff48c3417618cd22c5)
+Inventory Collection has 0 items.
+StockMove Aggregation (Non-zero):
+
+Checking Distributor: demo distributor (693e42e006110d7635e57c99)
+Inventory Collection has 0 items.
+StockMove Aggregation (Non-zero):
+
+Checking Distributor: Test Distributor (6943dc4fae52aafc8d32f27c)
+Inventory Collection has 0 items.
+StockMove Aggregation (Non-zero):
+
+Checking Distributor: Anant Sales (6893635d853effc40396cfb3)
+Inventory Collection has 18 items.
+  [INV] फुल क्रीम गोल्ड 1 किलो: 288
+  [INV] फुल क्रीम गोल्ड 500 ग्राम: 276
+  [INV] टोंड ताजा 1 किलो: 63
+  [INV] टोंड ताजा 500 ग्राम: 39
+  [INV] गाय 1 किलो: 30
+  [INV] गाय 500 ग्राम: 12
+  [INV] गाय का बच्चा: 51
+  [INV] भैंस 1 किलो: 27
+  [INV] दही 1 किलो: 9
+  [INV] दही 400 ग्राम: -52
+  [INV] दही 200 ग्राम: 55
+  [INV] दही कप 100 ग्राम: -1
+  [INV] छाछ ₹10: 35
+  [INV] मुन्ना मक्खन: -2
+  [INV] पनीर 200 ग्राम: -10
+  [INV] ब्रेड 20: 18
+  [INV] लस्सी 500 ग्राम: -26
+  [INV] बिंदास चॉकलेट: -9
+StockMove Aggregation (Non-zero):
+  [MOVE] फुल क्रीम गोल्ड 1 किलो: -71950
+  [MOVE] टोंड ताजा 1 किलो: -30062
+  [MOVE] फुल क्रीम गोल्ड 500 ग्राम: -34310
+  [MOVE] टोंड ताजा 500 ग्राम: -11541.5
+  [MOVE] गाय 500 ग्राम: -4535
+  [MOVE] गाय 1 किलो: -4716
+  [MOVE] दही 400 ग्राम: -13407
+  [MOVE] दही 1 किलो: -3133
+  [MOVE] दही 200 ग्राम: -6856
+  [MOVE] छाछ ₹10: -5250
+  [MOVE] भैंस 1 किलो: -11724
+  [MOVE] दही कप 400 ग्राम: -20
+  [MOVE] तड़का छाछ: -2898
+  [MOVE] लस्सी 500 ग्राम: -1929
+  [MOVE] मीठी लस्सी: -970
+  [MOVE] दही 850 ग्राम: -922
+  [MOVE] गाय का बच्चा: -9955
+  [MOVE] पनीर 200 ग्राम: -1778
+  [MOVE] दही कप 200 ग्राम: -579
+  [MOVE] ब्रेड 20: -1150
+  [MOVE] दही मटका 15 किलो: -14
+  [MOVE] दही कप 100 ग्राम: -203
+  [MOVE] भैंस 500 ग्राम: -150
+  [MOVE] टी स्पेशल 1 किलो: -388
+  [MOVE] मुन्ना मक्खन: -65
+  [MOVE] टी स्पेशल 500 ग्राम: -24
+  [MOVE] बिंदास चॉकलेट: -285

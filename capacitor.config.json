@@ -1,0 +1,5 @@
+{
+  "appId": "com.amuldist.app",
+  "appName": "AmulDistApp",
+  "webDir": "server/static"
+}

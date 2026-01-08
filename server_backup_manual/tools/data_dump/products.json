@@ -1,0 +1,282 @@
+[
+  {
+    "_id": "68a492f529f1b3eefa922748",
+    "nameEnglish": "फुल क्रीम गोल्ड 1 किलो",
+    "nameHindi": "फुल क्रीम गोल्ड 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:06:29.471Z",
+    "updatedAt": "2025-12-09T01:08:45.063Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a4931029f1b3eefa92274e",
+    "nameEnglish": "फुल क्रीम गोल्ड 500 ग्राम",
+    "nameHindi": "फुल क्रीम गोल्ड 500 ग्राम",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:06:56.952Z",
+    "updatedAt": "2025-12-09T01:08:45.077Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a4933229f1b3eefa922754",
+    "nameEnglish": "टोंड ताजा 1 किलो",
+    "nameHindi": "टोंड ताजा 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:07:30.796Z",
+    "updatedAt": "2025-12-09T01:08:44.990Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a4934f29f1b3eefa92275a",
+    "nameEnglish": "टोंड ताजा 500 ग्राम",
+    "nameHindi": "टोंड ताजा 500 ग्राम",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:07:59.246Z",
+    "updatedAt": "2025-12-09T01:08:43.126Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a493880f16c9aff95cc503",
+    "nameEnglish": "गाय 1 किलो",
+    "nameHindi": "गाय 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:08:56.665Z",
+    "updatedAt": "2025-12-09T01:08:43.139Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a493950f16c9aff95cc50c",
+    "nameEnglish": "गाय 500 ग्राम",
+    "nameHindi": "गाय 500 ग्राम",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:09:09.188Z",
+    "updatedAt": "2025-12-09T01:08:43.141Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a493f60f16c9aff95cc525",
+    "nameEnglish": "गाय का बच्चा",
+    "nameHindi": "गाय का बच्चा",
+    "active": true,
+    "unit": "68a493db0f16c9aff95cc51a",
+    "createdAt": "2025-08-19T15:10:46.858Z",
+    "updatedAt": "2025-12-09T01:08:43.058Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a494330f16c9aff95cc52b",
+    "nameEnglish": "भैंस 1 किलो",
+    "nameHindi": "भैंस 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:11:47.240Z",
+    "updatedAt": "2025-12-09T01:08:43.138Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a494420f16c9aff95cc531",
+    "nameEnglish": "भैंस 500 ग्राम",
+    "nameHindi": "भैंस 500 ग्राम",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:12:02.936Z",
+    "updatedAt": "2025-12-09T01:08:41.153Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a494b7c881d915d3effc9b",
+    "nameEnglish": "टी स्पेशल 1 किलो",
+    "nameHindi": "टी स्पेशल 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:13:59.490Z",
+    "updatedAt": "2025-12-09T01:08:41.170Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a494dbc881d915d3effcae",
+    "nameEnglish": "टी स्पेशल 500 ग्राम",
+    "nameHindi": "टी स्पेशल 500 ग्राम",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:14:35.814Z",
+    "updatedAt": "2025-12-09T01:08:41.167Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a495bbc881d915d3effcb4",
+    "nameEnglish": "गिर गाय 1 किलो",
+    "nameHindi": "गिर गाय 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T15:18:19.714Z",
+    "updatedAt": "2025-12-09T01:08:41.168Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a4a71949da2d3fde474220",
+    "nameEnglish": "दही 1 किलो",
+    "nameHindi": "दही 1 किलो",
+    "active": true,
+    "unit": "68a2c4c6440962a09d36cf98",
+    "createdAt": "2025-08-19T16:32:25.703Z",
+    "updatedAt": "2025-12-09T01:08:41.120Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a821cbcff790d02178af83",
+    "nameEnglish": "दही 400 ग्राम",
+    "nameHindi": "दही 400 ग्राम",
+    "active": true,
+    "unit": "68a562bf5f1f64d31750c405",
+    "createdAt": "2025-08-22T07:52:43.558Z",
+    "updatedAt": "2025-12-09T01:08:39.365Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a821e0d25c0f0e6ef143a1",
+    "nameEnglish": "दही 200 ग्राम",
+    "nameHindi": "दही 200 ग्राम",
+    "active": true,
+    "unit": "68a493db0f16c9aff95cc51a",
+    "createdAt": "2025-08-22T07:53:04.832Z",
+    "updatedAt": "2025-12-09T01:08:39.361Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8243813257fc97ea10228",
+    "nameEnglish": "दही कप 100 ग्राम",
+    "nameHindi": "दही कप 100 ग्राम",
+    "active": true,
+    "unit": "68a8222dd25c0f0e6ef143bb",
+    "createdAt": "2025-08-22T08:03:04.233Z",
+    "updatedAt": "2025-12-09T01:08:39.359Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8244913257fc97ea1022e",
+    "nameEnglish": "दही कप 200 ग्राम",
+    "nameHindi": "दही कप 200 ग्राम",
+    "active": true,
+    "unit": "68a8220dd25c0f0e6ef143af",
+    "createdAt": "2025-08-22T08:03:21.227Z",
+    "updatedAt": "2025-12-09T01:08:39.353Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8245a13257fc97ea10234",
+    "nameEnglish": "दही कप 400 ग्राम",
+    "nameHindi": "दही कप 400 ग्राम",
+    "active": true,
+    "unit": "68a8221ad25c0f0e6ef143b5",
+    "createdAt": "2025-08-22T08:03:38.783Z",
+    "updatedAt": "2025-12-09T01:08:39.322Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8247d13257fc97ea1023a",
+    "nameEnglish": "छाछ ₹10",
+    "nameHindi": "छाछ ₹10",
+    "active": true,
+    "unit": "68a82260d25c0f0e6ef143c1",
+    "createdAt": "2025-08-22T08:04:13.049Z",
+    "updatedAt": "2025-12-09T01:08:37.163Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8257a13257fc97ea1028d",
+    "nameEnglish": "मीठी लस्सी",
+    "nameHindi": "मीठी लस्सी",
+    "active": true,
+    "unit": "68a8250713257fc97ea1024a",
+    "createdAt": "2025-08-22T08:08:26.075Z",
+    "updatedAt": "2025-12-09T01:08:37.222Z",
+    "__v": 0
+  },
+  {
+    "_id": "68a8259413257fc97ea10293",
+    "nameEnglish": "तड़का छाछ",
+    "nameHindi": "तड़का छाछ",
+    "active": true,
+    "unit": "68a82260d25c0f0e6ef143c1",
+    "createdAt": "2025-08-22T08:08:52.126Z",
+    "updatedAt": "2025-12-09T01:08:37.223Z",
+    "__v": 0
+  },
+  {
+    "_id": "68b009c15360eb52c4c42eb4",
+    "nameEnglish": "मुन्ना मक्खन",
+    "nameHindi": "मुन्ना मक्खन",
+    "active": true,
+    "unit": "68a1b5de3090fca0853f014b",
+    "createdAt": "2025-08-28T07:48:17.850Z",
+    "updatedAt": "2025-12-09T01:08:37.209Z",
+    "__v": 0
+  },
+  {
+    "_id": "68c12e102b9180ca0215c0a5",
+    "nameEnglish": "पनीर 200 ग्राम",
+    "nameHindi": "पनीर 200 ग्राम",
+    "active": true,
+    "unit": "68c12dda2b9180ca0215c05a",
+    "createdAt": "2025-09-10T07:51:44.248Z",
+    "updatedAt": "2025-12-09T01:08:37.234Z",
+    "__v": 0
+  },
+  {
+    "_id": "68c12ea5e31a5fddc6c3b6f7",
+    "nameEnglish": "ब्रेड 20",
+    "nameHindi": "ब्रेड 20",
+    "active": true,
+    "unit": "68c12dda2b9180ca0215c05a",
+    "createdAt": "2025-09-10T07:54:13.223Z",
+    "updatedAt": "2025-12-09T01:08:34.974Z",
+    "__v": 0
+  },
+  {
+    "_id": "68c12f58e31a5fddc6c3b6fd",
+    "nameEnglish": "दही 850 ग्राम",
+    "nameHindi": "दही 850 ग्राम",
+    "active": true,
+    "unit": "68a8221ad25c0f0e6ef143b5",
+    "createdAt": "2025-09-10T07:57:12.538Z",
+    "updatedAt": "2025-12-09T01:08:34.962Z",
+    "__v": 0
+  },
+  {
+    "_id": "68c15ec6f305f13004d3e5ad",
+    "nameEnglish": "लस्सी 500 ग्राम",
+    "nameHindi": "लस्सी 500 ग्राम",
+    "active": true,
+    "unit": "68a824b513257fc97ea10244",
+    "createdAt": "2025-09-10T11:19:34.626Z",
+    "updatedAt": "2025-12-09T01:08:34.978Z",
+    "__v": 0
+  },
+  {
+    "_id": "68c58975dd7e187dc1a66aff",
+    "nameEnglish": "दही मटका 15 किलो",
+    "nameHindi": "दही मटका 15 किलो",
+    "active": true,
+    "unit": "68a493c50f16c9aff95cc514",
+    "createdAt": "2025-09-13T15:10:45.160Z",
+    "updatedAt": "2025-12-09T01:08:34.943Z",
+    "__v": 0
+  },
+  {
+    "_id": "693773675e8a83f6da3de192",
+    "nameEnglish": "बिंदास चॉकलेट",
+    "nameHindi": "बिंदास चॉकलेट",
+    "active": true,
+    "unit": "693773395e8a83f6da3de13f",
+    "createdAt": "2025-12-09T00:55:03.155Z",
+    "updatedAt": "2025-12-09T01:08:34.977Z",
+    "__v": 0
+  }
+]
