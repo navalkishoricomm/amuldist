@@ -468,7 +468,7 @@ window.switchTab = (id, pushHistory = true) => {
   if(id==='tab-stock-in') renderStockIn();
   if(id==='tab-stock-out') renderStockOut();
   if(id==='tab-stock-wastage') renderStockWastage();
-  if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); bindAdjustmentForm(); }
+  if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); bindRetailerEdit(); bindAdjustmentForm(); }
   if(id==='tab-staff') { loadStaff(); bindStaffForm(); }
   if(id==='tab-rates') { loadDistRates(); }
   if(id==='tab-reports') { renderReport(); bindReportActions(); }
@@ -829,6 +829,19 @@ async function renderStockIn(editMove = null){
   try {
     const suppliers = await api('/api/my/suppliers');
     const products = await api('/api/my/products');
+    
+    // Fetch product stats for sorting
+    try {
+        const stats = await api('/api/my/product-stats');
+        const statMap = {};
+        stats.forEach(s => statMap[s._id] = s.movement);
+        products.sort((a, b) => {
+            const mA = statMap[a._id] || 0;
+            const mB = statMap[b._id] || 0;
+            return mB - mA;
+        });
+    } catch(e) { console.error('Failed to sort products', e); }
+
     const units = await api('/api/units');
     const inv = await api('/api/my/inventory');
     const invMap = {}; inv.forEach(i => invMap[i.productId] = Number(i.quantity) || 0);
@@ -963,7 +976,7 @@ async function renderStockIn(editMove = null){
           <td>
             <div class="fw-bold small">${p.nameEnglish}</div>
           </td>
-          <td class="text-center col-stock"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${formatUnitQty(curQty, p.unit, unitMap)}</span></td>
+          <td class="text-center col-stock d-none d-md-table-cell"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${formatUnitQty(curQty, p.unit, unitMap)}</span></td>
           <td>${qtyInCell}</td>
           <td>${qtyOutSupCell}</td>
         `;
@@ -1277,6 +1290,19 @@ async function renderStockOut(initialState = null){
   try {
     const retailers = await api('/api/my/retailers');
     const products = await api('/api/my/products');
+
+    // Fetch product stats for sorting
+    try {
+        const stats = await api('/api/my/product-stats');
+        const statMap = {};
+        stats.forEach(s => statMap[s._id] = s.movement);
+        products.sort((a, b) => {
+            const mA = statMap[a._id] || 0;
+            const mB = statMap[b._id] || 0;
+            return mB - mA;
+        });
+    } catch(e) { console.error('Failed to sort products', e); }
+
     const units = await api('/api/units');
     const inv = await api('/api/my/inventory');
     const distRates = await api('/api/my/rates');
@@ -2006,8 +2032,11 @@ function loadRetailers(){
       const div = document.createElement('div');
       div.className = 'list-group-item d-flex justify-content-between align-items-center';
       const canPay = ROLE !== 'staff' || perms.includes('payment_cash') || perms.includes('payment_online');
+      const canEdit = ROLE !== 'staff' || perms.includes('add_retailer');
       const payBtnHtml = canPay ? `<button class="btn btn-sm btn-outline-primary" onclick="preparePayment('${r._id}', '${r.name}', ${r.currentBalance||0})" data-bs-toggle="modal" data-bs-target="#paymentModal" title="Payment"><i class="bi bi-currency-rupee"></i></button>` : '';
       const adjBtnHtml = canPay ? `<button class="btn btn-sm btn-outline-warning" onclick="prepareAdjustment('${r._id}', '${r.name}', ${r.currentBalance||0})" data-bs-toggle="modal" data-bs-target="#adjustmentModal" title="Adjustment"><i class="bi bi-sliders"></i></button>` : '';
+      const editBtnHtml = canEdit ? `<button class="btn btn-sm btn-outline-secondary" data-act="edit" data-id="${r._id}" title="Edit"><i class="bi bi-pencil"></i></button>` : '';
+      
       div.innerHTML = `
         <div>
           <div class="fw-bold">${r.name}</div>
@@ -2018,6 +2047,7 @@ function loadRetailers(){
           <div class="fw-bold ${r.currentBalance > 0 ? 'text-danger' : 'text-success'}">₹${(r.currentBalance||0).toFixed(2)}</div>
           <div class="d-flex gap-1">
              <button class="btn btn-sm btn-outline-info" data-act="ledger" data-id="${r._id}" title="Ledger"><i class="bi bi-journal-text"></i></button>
+             ${editBtnHtml}
              ${adjBtnHtml}
              ${payBtnHtml}
           </div>
@@ -2038,8 +2068,54 @@ function loadRetailers(){
         const item = retailers.find((x)=>x._id===id);
         if(item) renderLedgerModal(item, btn);
       }
+      if(act==='edit'){
+        const item = retailers.find((x)=>x._id===id);
+        if(item) openEditRetailerModal(item);
+      }
     };
   });
+}
+
+function openEditRetailerModal(r){
+  qs('#editRetId').value = r._id;
+  qs('#editRetName').value = r.name;
+  qs('#editRetPhone').value = r.phone || '';
+  qs('#editRetAddress').value = r.address || '';
+  qs('#editRetSortOrder').value = r.sortOrder || 0;
+  
+  const m = new bootstrap.Modal(document.getElementById('editRetailerModal'));
+  m.show();
+}
+
+function bindRetailerEdit(){
+  const btn = qs('#editRetSave');
+  if(btn){
+     btn.onclick = async () => {
+        const id = qs('#editRetId').value;
+        const name = qs('#editRetName').value;
+        const phone = qs('#editRetPhone').value;
+        const address = qs('#editRetAddress').value;
+        const sortOrder = qs('#editRetSortOrder').value;
+        
+        if(!id || !name) return;
+        
+        try {
+           await api(`/api/my/retailers/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ name, phone, address, sortOrder: Number(sortOrder)||0 })
+           });
+           
+           // Hide modal
+           const el = document.getElementById('editRetailerModal');
+           const m = bootstrap.Modal.getInstance(el);
+           if(m) m.hide();
+           
+           loadRetailers();
+        } catch(e){
+           alert(e.message || 'Failed to update retailer');
+        }
+     };
+  }
 }
 
 function bindRetailerAdd() {
@@ -2050,19 +2126,21 @@ function bindRetailerAdd() {
        const phone = qs('#retPhone').value;
        const address = qs('#retAddress').value;
        const openingBalance = qs('#retBalance').value;
+       const sortOrder = qs('#retSortOrder').value;
        
        if(!name) { alert('Name is required'); return; }
        
        try {
            await api('/api/my/retailers', {
                method: 'POST',
-               body: JSON.stringify({ name, phone, address, openingBalance: Number(openingBalance)||0 })
+               body: JSON.stringify({ name, phone, address, openingBalance: Number(openingBalance)||0, sortOrder: Number(sortOrder)||0 })
            });
            
            qs('#retName').value = '';
            qs('#retPhone').value = '';
            qs('#retAddress').value = '';
            qs('#retBalance').value = '';
+           qs('#retSortOrder').value = '';
            
            // Dismiss modal manually if needed, or rely on data-bs-dismiss.
            // Since the button has data-bs-dismiss, it closes automatically.
@@ -2214,7 +2292,7 @@ async function bindReportActions(){
       } else if(cat === 'financial'){
           show(qs('#repTypeDiv'));
           show(qs('#repRetailerDiv'));
-          typeSel.innerHTML = '<option value="">All</option><option value="order">Order</option><option value="payment_cash">Cash</option><option value="payment_online">Online</option>';
+          typeSel.innerHTML = '<option value="">All Payments</option><option value="payment_cash">Cash</option><option value="payment_online">Online</option>';
       } else if(cat === 'retailer_ledger'){
           show(qs('#repRetailerDiv'));
           // hide type for ledger? usually we want to see all. But optional is fine.
@@ -2281,7 +2359,10 @@ async function renderReport(){
       url = '/api/my/stock-moves';
       if(productId) params.push(`productId=${encodeURIComponent(productId)}`);
       if(retailerId) params.push(`retailerId=${encodeURIComponent(retailerId)}`);
-    } else if(cat === 'financial' || cat === 'retailer_ledger'){
+    } else if(cat === 'financial'){
+      url = '/api/my/transactions';
+      if(retailerId) params.push(`retailerId=${encodeURIComponent(retailerId)}`);
+    } else if(cat === 'retailer_ledger'){
       url = '/api/my/transactions';
       if(retailerId) params.push(`retailerId=${encodeURIComponent(retailerId)}`);
       if(type) params.push(`type=${encodeURIComponent(type)}`);
@@ -2299,6 +2380,8 @@ async function renderReport(){
     const products = await api('/api/products');
     const pMap = {}; products.forEach(p=>pMap[p._id]=p.nameEnglish);
     const rMap = {};
+    const rBalMap = {};
+    const rSortMap = {};
     let selectedRetailer = null;
     try{ 
       let retailers = [];
@@ -2306,6 +2389,8 @@ async function renderReport(){
       else retailers = await api('/api/my/retailers');
       retailers.forEach(r=>{
         rMap[r._id]=r.name;
+        rBalMap[r._id] = Number(r.currentBalance)||0;
+        rSortMap[r._id] = Number(r.sortOrder)||0;
         if(retailerId && r._id === retailerId) selectedRetailer = r;
       }); 
     }catch{}
@@ -2468,7 +2553,16 @@ async function renderReport(){
       let totalNet = 0;
       let totalClosing = 0;
 
-      if(tbody){ tbody.innerHTML=''; Object.values(agg).forEach(item => {
+      if(tbody){ tbody.innerHTML=''; 
+      
+      // Sort by Quantity Movement (IN + OUT) Descending
+      const sortedItems = Object.values(agg).sort((a, b) => {
+          const moveA = (a.in || 0) + (a.out || 0);
+          const moveB = (b.in || 0) + (b.out || 0);
+          return moveB - moveA;
+      });
+
+      sortedItems.forEach(item => {
           const pObj = item.obj;
           const pId = item.id;
           const prodName = pObj ? (pObj.nameEnglish || pObj.nameHindi || '?') : (pMap[pId] || pId || '-');
@@ -2517,10 +2611,80 @@ async function renderReport(){
           tbody.appendChild(tr);
       }
       }
-    } else if(cat === 'financial' || cat === 'retailer_ledger'){
+    } else if(cat === 'financial'){
+      header = ['Date','Retailer','Op Balance','StockOut Amount','Payment Received','Cl Balance'];
+      if(thead) thead.innerHTML = '<tr><th>Date</th><th>Retailer</th><th class="text-end">Op Balance</th><th class="text-end">StockOut Amount</th><th class="text-end">Payment Received</th><th class="text-end">Cl Balance</th></tr>';
+      
+      const currentBals = {...rBalMap};
+      const agg = {};
+      
+      // We iterate items (Newest -> Oldest) to calculate running balances and aggregate
+      items.forEach(t=>{
+          const ty = t.type;
+          const rObj = t.retailerId || {};
+          const rId = rObj._id || (typeof t.retailerId === 'string' ? t.retailerId : null);
+          const retName = rObj.name || rMap[rId] || '-';
+          const amt = Number(t.amount)||0;
+          
+          // Balance Rewind Logic (Newest to Oldest)
+          // clBal is the balance AFTER this transaction
+          let clBal = currentBals[rId] !== undefined ? currentBals[rId] : 0;
+          let opBal = clBal; // opBal will be the balance BEFORE this transaction
+          
+          if(ty === 'order') opBal = clBal - amt; 
+          else if(['payment_cash','payment_online'].includes(ty)) opBal = clBal + amt;
+          else if(ty === 'return') opBal = clBal + amt; // Assuming return reduces debt like payment
+          
+          if(rId) currentBals[rId] = opBal;
+
+          if(rId){
+              if(!agg[rId]){
+                  agg[rId] = {
+                      name: retName,
+                      sortOrder: rSortMap[rId] || 0,
+                      clBal: clBal, // First time seen = Balance at End of Period
+                      stockOut: 0,
+                      payment: 0,
+                      opBal: 0 
+                  };
+              }
+              
+              if(ty === 'order') agg[rId].stockOut += amt;
+              else if(['payment_cash','payment_online'].includes(ty)) agg[rId].payment += amt;
+              
+              // Last time seen = Balance at Start of Period
+              agg[rId].opBal = opBal;
+          }
+      });
+
+      if(tbody){ 
+        tbody.innerHTML='';
+        const dateRange = (from || to) ? `${from || '?'} to ${to || 'Now'}` : 'All Time';
+        
+        // Sort by SortOrder then Retailer Name
+        const sorted = Object.values(agg).sort((a,b)=> {
+            const diff = a.sortOrder - b.sortOrder;
+            if(diff !== 0) return diff;
+            return a.name.localeCompare(b.name);
+        });
+        
+        sorted.forEach(row => {
+            // Filter: If user wants only "payment received", we might check row.payment > 0?
+            // But user also asked for "StockOut Amount" column and "for all retailers".
+            // We show all active retailers in the period.
+            if(search && !row.name.toLowerCase().includes(search)) return;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${dateRange}</td><td>${row.name}</td><td class="text-end">₹${row.opBal.toFixed(2)}</td><td class="text-end">₹${row.stockOut.toFixed(2)}</td><td class="text-end">₹${row.payment.toFixed(2)}</td><td class="text-end">₹${row.clBal.toFixed(2)}</td>`;
+            tbody.appendChild(tr);
+            data.push([dateRange, row.name, row.opBal.toFixed(2), row.stockOut.toFixed(2), row.payment.toFixed(2), row.clBal.toFixed(2)]);
+        });
+      }
+
+    } else if(cat === 'retailer_ledger'){
       let showBalance = false;
       let runningBal = 0;
-      if(cat === 'retailer_ledger' && selectedRetailer && !to) {
+      if(selectedRetailer && !to) {
           showBalance = true;
           runningBal = selectedRetailer.currentBalance || 0;
       }
@@ -2672,7 +2836,7 @@ function showOutBreakdown(pId){
             visited.add(r._id);
             const item = agg[r._id];
             const qty = item ? item.qty : 0;
-            rows.push({ name: r.name, qty, kind: 'retailer' });
+            rows.push({ name: r.name, qty, kind: 'retailer', sortOrder: Number(r.sortOrder)||0 });
         });
         
         // Orphaned sales
@@ -2682,15 +2846,17 @@ function showOutBreakdown(pId){
                 let kind = 'retailer';
                 if(rid === 'wastage') kind = 'wastage';
                 else if(String(rid).startsWith('supplier:')) kind = 'supplier';
-                rows.push({ name: agg[rid].name, qty: agg[rid].qty, kind });
+                rows.push({ name: agg[rid].name, qty: agg[rid].qty, kind, sortOrder: 9999 });
             }
         });
 
         // Calculate total
         rows.forEach(r => total += r.qty);
 
-        // Sort: High quantity first, then alphabetical
+        // Sort: SortOrder first, then High quantity, then alphabetical
         rows.sort((a,b) => {
+            const diff = a.sortOrder - b.sortOrder;
+            if(diff !== 0) return diff;
             if(b.qty !== a.qty) return b.qty - a.qty;
             return a.name.localeCompare(b.name);
         });

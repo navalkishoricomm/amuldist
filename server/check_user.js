@@ -1,31 +1,35 @@
+
+require('dotenv').config();
 const mongoose = require('mongoose');
-const dotenv = require('dotenv');
-dotenv.config();
 
-const mongoUri = 'mongodb://127.0.0.1:27017/amul_dist_app';
-
-const userSchema = new mongoose.Schema({
-  name: String,
-  email: String,
-  role: String,
-  distributorId: mongoose.Schema.Types.ObjectId
-});
-const User = mongoose.model('User', userSchema);
-
-async function checkUser() {
+(async () => {
   try {
+    const mongoUri = 'mongodb://127.0.0.1:27017/amul_dist_app';
     await mongoose.connect(mongoUri);
-    const user = await User.findOne({ email: 'rohitk29@gmail.com' });
-    if (user) {
-      console.log('User found:', user);
-    } else {
-      console.log('User not found');
+    const id = '69152d6a860e17b5053ef0a3';
+    console.log(`Checking for user ${id}...`);
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        console.log('Invalid ObjectId format');
+        process.exit(0);
     }
-  } catch (err) {
-    console.error(err);
+
+    const collection = mongoose.connection.db.collection('users');
+    const u = await collection.findOne({ _id: new mongoose.Types.ObjectId(id) });
+    
+    if (u) {
+      console.log('User found:', { 
+          id: u._id, 
+          name: u.name, 
+          role: u.role, 
+          distributorId: u.distributorId 
+      });
+    } else {
+      console.log('User NOT found in DB');
+    }
+  } catch (e) {
+    console.error(e);
   } finally {
     await mongoose.disconnect();
   }
-}
-
-checkUser();
+})();

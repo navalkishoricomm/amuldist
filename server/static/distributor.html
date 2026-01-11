@@ -25,9 +25,9 @@
       #tab-stock-in .table .input-group.input-group-sm,
       #tab-stock-out .table .input-group.input-group-sm { flex-wrap: nowrap; }
       #tab-stock-in .table .input-group.input-group-sm .form-control.qty-narrow,
-      #tab-stock-out .table .input-group.input-group-sm .form-control.qty-narrow { width: 64px; padding: .125rem .25rem; }
+      #tab-stock-out .table .input-group.input-group-sm .form-control.qty-narrow { width: 45px; padding: .1rem .2rem; font-size: 0.75rem; }
       #tab-stock-in .table .input-group.input-group-sm .input-group-text,
-      #tab-stock-out .table .input-group.input-group-sm .input-group-text { padding: .125rem .25rem; font-size: .75rem; }
+      #tab-stock-out .table .input-group.input-group-sm .input-group-text { padding: .1rem .2rem; font-size: .75rem; }
       #tab-stock-in .table td, #tab-stock-in .table th,
       #tab-stock-out .table td, #tab-stock-out .table th { padding: 0.25rem; }
     }
@@ -286,7 +286,7 @@
                   <thead class="table-light sticky-top">
                     <tr>
                       <th style="width: 40%">Product</th>
-                      <th style="width: 15%" class="text-center col-stock">Cur</th>
+                      <th style="width: 15%" class="text-center col-stock d-none d-md-table-cell">Cur</th>
                       <th style="width: 25%">In Qty</th>
                       <th style="width: 20%">Out to Supplier</th>
                     </tr>
@@ -546,9 +546,28 @@
           <div class="mb-2"><label class="form-label">Name</label><input id="retName" class="form-control" /></div>
           <div class="mb-2"><label class="form-label">Phone</label><input id="retPhone" class="form-control" /></div>
           <div class="mb-2"><label class="form-label">Address</label><input id="retAddress" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Sort Order</label><input id="retSortOrder" type="number" class="form-control" placeholder="0" /></div>
           <div class="mb-2"><label class="form-label">Opening balance</label><input id="retBalance" type="number" class="form-control" /></div>
         </div>
         <div class="modal-footer"><button id="retSave" class="btn btn-primary" data-bs-dismiss="modal">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Retailer Modal -->
+  <div class="modal fade" id="editRetailerModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Edit Retailer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="editRetId" />
+          <div class="mb-2"><label class="form-label">Name</label><input id="editRetName" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Phone</label><input id="editRetPhone" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Address</label><input id="editRetAddress" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Sort Order</label><input id="editRetSortOrder" type="number" class="form-control" placeholder="0" /></div>
+          <div class="form-text small">Lower numbers appear first. Default is 0.</div>
+        </div>
+        <div class="modal-footer"><button id="editRetSave" class="btn btn-primary" data-bs-dismiss="modal">Update</button></div>
       </div>
     </div>
   </div>

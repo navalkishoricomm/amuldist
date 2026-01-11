@@ -35,6 +35,7 @@ const userSchema = new mongoose.Schema(
     createdByStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     currentBalance: { type: Number, default: 0 },
     profileEditedOnce: { type: Boolean, default: false },
+    sortOrder: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -1298,7 +1299,7 @@ app.get('/api/orders/:id', auth, requireDistributorOrStaff(null), async (req, re
           populate: { path: 'firstUnit secondUnit' }
         }
       })
-      .populate('retailerId', 'name');
+      .populate('retailerId', 'name sortOrder');
     if (!order) return res.status(404).json({ error: 'order not found' });
     res.json(order);
   } catch (err) {
@@ -1641,10 +1642,31 @@ async function start() {
 app.get('/api/my/retailers', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
     const { distributorId } = getContext(req);
-    const items = await User.find({ role: 'retailer', distributorId }).sort({ createdAt: -1 });
+    const items = await User.find({ role: 'retailer', distributorId }).sort({ sortOrder: 1, name: 1 });
     res.json(items);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list retailers' });
+  }
+});
+
+app.put('/api/my/retailers/:id', auth, requireDistributorOrStaff('add_retailer'), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    const { id } = req.params;
+    const { name, phone, address, sortOrder } = req.body;
+    
+    const retailer = await User.findOne({ _id: id, role: 'retailer', distributorId });
+    if (!retailer) return res.status(404).json({ error: 'Retailer not found' });
+    
+    if (name !== undefined) retailer.name = name;
+    if (phone !== undefined) retailer.phone = phone;
+    if (address !== undefined) retailer.address = address;
+    if (sortOrder !== undefined) retailer.sortOrder = Number(sortOrder);
+    
+    await retailer.save();
+    res.json(retailer);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update retailer' });
   }
 });
 
@@ -1668,6 +1690,26 @@ app.post('/api/my/suppliers', auth, requireDistributorOrStaff('stock_in'), async
   } catch (err) {
     if (err.code === 11000) return res.status(400).json({ error: 'Supplier already exists' });
     res.status(500).json({ error: 'Failed to create supplier' });
+  }
+});
+
+app.get('/api/my/product-stats', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    const stats = await StockMove.aggregate([
+      { $match: { distributorId: new mongoose.Types.ObjectId(distributorId) } },
+      { $group: {
+          _id: "$productId",
+          totalIn: { $sum: { $cond: [{ $eq: ["$type", "IN"] }, "$quantity", 0] } },
+          totalOut: { $sum: { $cond: [{ $eq: ["$type", "OUT"] }, "$quantity", 0] } },
+          movement: { $sum: "$quantity" }
+        }
+      }
+    ]);
+    res.json(stats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch product stats' });
   }
 });
 
@@ -1715,7 +1757,7 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     const items = await StockMove.find(filter)
       .populate('createdByStaffId', 'name')
       .populate('supplierId', 'name')
-      .populate('retailerId', 'name')
+      .populate('retailerId', 'name sortOrder')
       .populate({
         path: 'productId',
         select: 'nameEnglish nameHindi unit',
@@ -1895,7 +1937,7 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
       }
     }
     const items = await Transaction.find(filter)
-      .populate('retailerId', 'name')
+      .populate('retailerId', 'name sortOrder')
       .populate('createdByStaffId', 'name')
       .sort({ createdAt: -1 });
     console.log('Found transactions:', items.length);
