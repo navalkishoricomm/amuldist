@@ -595,7 +595,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/me', auth, async (req, res) => {
   const u = req.user;
-  res.json({ _id: u._id, name: u.name, email: u.email, role: u.role, active: u.active, profileEditedOnce: u.profileEditedOnce, phone: u.phone, address: u.address });
+  res.json({ _id: u._id, name: u.name, email: u.email, role: u.role, active: u.active, profileEditedOnce: u.profileEditedOnce, phone: u.phone, address: u.address, permissions: u.permissions });
 });
 
 app.post('/api/auth/logout', auth, async (_req, res) => {
@@ -1855,7 +1855,7 @@ app.delete('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), asy
 app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
   try {
     const { distributorId, staffId } = getContext(req);
-    const { retailerId, amount, note } = req.body;
+    const { retailerId, amount, note, date } = req.body;
 
     if (!retailerId) return res.status(400).json({ error: 'Retailer required' });
     const amt = Number(amount);
@@ -1863,6 +1863,8 @@ app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment
 
     const retailer = await User.findOne({ _id: retailerId, distributorId, role: 'retailer' });
     if (!retailer) return res.status(404).json({ error: 'Retailer not found' });
+    
+    const adjDate = date ? new Date(date) : new Date();
 
     // Create transaction
     await Transaction.create({
@@ -1872,21 +1874,7 @@ app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment
       type: 'adjustment',
       amount: amt, // Store signed amount to indicate Debit (+) or Credit (-)
       note: note || 'Balance Adjustment',
-      // We store amount as positive usually, but for adjustment it's tricky. 
-      // Transaction usually stores amount involved.
-      // However, we need to know if it's debit or credit. 
-      // Let's store signed amount? No, schema says Number.
-      // But typically 'order' adds to balance, 'payment' subtracts.
-      // 'adjustment' can do either.
-      // If we store signed amount, we might break existing assumption that amount is positive?
-      // Let's check how balance is calculated.
-      // Usually balance is calculated by summing orders and subtracting payments.
-      // For adjustment, if we want to add to balance (Debit), we treat it like order.
-      // If we want to subtract (Credit), we treat it like payment.
-      // But type is 'adjustment'.
-      // So we should probably allow negative amount in DB? Or use separate types 'adjustment_debit', 'adjustment_credit'?
-      // User asked for "adjustment entry".
-      // Let's check how User.currentBalance is updated.
+      createdAt: adjDate
     });
     
     // Update retailer balance
@@ -1898,6 +1886,62 @@ app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment
     console.error(err);
     res.status(500).json({ error: 'Failed to record adjustment' });
   }
+});
+
+// Update Transaction (Adjustment only for now)
+app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
+    try {
+        const { distributorId } = getContext(req);
+        const { amount, note, date } = req.body;
+        
+        const tx = await Transaction.findOne({ _id: req.params.id, distributorId });
+        if(!tx) return res.status(404).json({ error: 'Transaction not found' });
+        
+        if(tx.type !== 'adjustment') return res.status(400).json({ error: 'Only adjustments can be edited' });
+        
+        const oldAmount = tx.amount;
+        const newAmount = amount !== undefined ? Number(amount) : oldAmount;
+        
+        if(amount !== undefined){
+            // Revert old amount from balance, apply new amount
+            // Balance = Balance - Old + New
+            const diff = newAmount - oldAmount;
+            await User.updateOne({ _id: tx.retailerId }, { $inc: { currentBalance: diff } });
+            tx.amount = newAmount;
+        }
+        
+        if(note !== undefined) tx.note = note;
+        if(date !== undefined) tx.createdAt = new Date(date);
+        
+        await tx.save();
+        res.json({ ok: true });
+    } catch(e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to update transaction' });
+    }
+});
+
+// Delete Transaction (Adjustment only for now)
+app.delete('/api/my/transactions/:id', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
+    try {
+        const { distributorId } = getContext(req);
+        
+        const tx = await Transaction.findOne({ _id: req.params.id, distributorId });
+        if(!tx) return res.status(404).json({ error: 'Transaction not found' });
+        
+        if(tx.type !== 'adjustment') return res.status(400).json({ error: 'Only adjustments can be deleted' });
+        
+        // Revert balance
+        // If amount was +100 (Debit), we subtract 100.
+        // If amount was -100 (Credit), we add 100 (subtract -100).
+        await User.updateOne({ _id: tx.retailerId }, { $inc: { currentBalance: -tx.amount } });
+        
+        await Transaction.deleteOne({ _id: tx._id });
+        res.json({ ok: true });
+    } catch(e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to delete transaction' });
+    }
 });
 
 app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (req, res) => {
@@ -1937,12 +1981,59 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
         }
       }
     }
-    const items = await Transaction.find(filter)
+    
+    let query = Transaction.find(filter)
       .populate('retailerId', 'name sortOrder')
       .populate('createdByStaffId', 'name')
       .sort({ createdAt: -1 });
-    console.log('Found transactions:', items.length);
-    res.json(items);
+
+    if (req.query.populateOrders === 'true') {
+        query = query.populate('referenceId');
+    }
+
+    const items = await query;
+    let results = items.map(i => i.toObject());
+
+    if (req.query.populateOrders === 'true') {
+      try {
+        const pIds = new Set();
+        results.forEach(tx => {
+          if (tx.referenceId && Array.isArray(tx.referenceId.items)) {
+            tx.referenceId.items.forEach(item => {
+              if (item.productId) pIds.add(item.productId.toString());
+            });
+          }
+        });
+
+        if (pIds.size > 0) {
+          const ids = Array.from(pIds);
+          const [prods, dProds] = await Promise.all([
+            Product.find({ _id: { $in: ids } }).select('nameEnglish nameHindi unit').lean(),
+            DistProduct.find({ _id: { $in: ids } }).select('nameEnglish nameHindi unit').lean()
+          ]);
+
+          const pMap = {};
+          prods.forEach(p => pMap[p._id.toString()] = p);
+          dProds.forEach(p => pMap[p._id.toString()] = p);
+
+          results.forEach(tx => {
+            if (tx.referenceId && Array.isArray(tx.referenceId.items)) {
+              tx.referenceId.items.forEach(item => {
+                if (item.productId) {
+                  item.productId = pMap[item.productId.toString()] || { nameEnglish: 'Unknown Product', _id: item.productId };
+                }
+              });
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Error populating orders:', err);
+        // Continue without population rather than failing
+      }
+    }
+
+    console.log('Found transactions:', results.length);
+    res.json(results);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list transactions' });
   }

@@ -554,18 +554,50 @@
         <div class="modal-body">
           <input type="hidden" id="staffId" />
           <div class="mb-2"><label class="form-label">Name</label><input id="staffName" class="form-control" /></div>
-          <div class="mb-2"><label class="form-label">Email</label><input id="staffEmail" type="email" class="form-control" /></div>
+          <div class="mb-2"><label class="form-label">Phone</label><input id="staffPhone" type="tel" class="form-control" /></div>
           <div class="mb-2"><label class="form-label">Password</label><input id="staffPassword" type="password" class="form-control" placeholder="Leave blank to keep current" /></div>
           <div class="mb-2">
-            <label class="form-label">Permissions</label>
-            <div class="form-check">
-              <input class="form-check-input staff-perm" type="checkbox" value="stock_in" id="permStockIn">
-              <label class="form-check-label" for="permStockIn">Stock IN</label>
+            <label class="form-label">Permissions (Quick Actions)</label>
+            <div class="row g-2">
+              <div class="col-6">
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="products" id="permProducts">
+                   <label class="form-check-label" for="permProducts">Products</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="inventory" id="permInventory">
+                   <label class="form-check-label" for="permInventory">Inventory</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="stock_in" id="permStockIn">
+                   <label class="form-check-label" for="permStockIn">Stock In</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="stock_out" id="permStockOut">
+                   <label class="form-check-label" for="permStockOut">Stock Out</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="rates" id="permRates">
+                   <label class="form-check-label" for="permRates">Rates</label>
+                 </div>
+              </div>
+              <div class="col-6">
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="view_retailers" id="permViewRetailers">
+                   <label class="form-check-label" for="permViewRetailers">Retailers (View)</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="reports" id="permReports">
+                   <label class="form-check-label" for="permReports">Reports</label>
+                 </div>
+                 <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="staff" id="permStaff">
+                   <label class="form-check-label" for="permStaff">Staff</label>
+                 </div>
+              </div>
             </div>
-            <div class="form-check">
-              <input class="form-check-input staff-perm" type="checkbox" value="stock_out" id="permStockOut">
-              <label class="form-check-label" for="permStockOut">Stock Out</label>
-            </div>
+            
+            <label class="form-label mt-2">Granular Permissions</label>
             <div class="form-check">
               <input class="form-check-input staff-perm" type="checkbox" value="payment_cash" id="permCashIn">
               <label class="form-check-label" for="permCashIn">Cash IN</label>

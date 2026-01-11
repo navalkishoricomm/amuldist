@@ -17,6 +17,9 @@ scp -6 -o StrictHostKeyChecking=no server/static/staff_logic.js "${TARGET}:${REM
 Write-Host "Uploading server/static/distributor.html..."
 scp -6 -o StrictHostKeyChecking=no server/static/distributor.html "${TARGET}:${REMOTE_PATH}/server/static/distributor.html"
 
+Write-Host "Uploading server/static/app.js..."
+scp -6 -o StrictHostKeyChecking=no server/static/app.js "${TARGET}:${REMOTE_PATH}/server/static/app.js"
+
 Write-Host "Uploading server/static/index.html..."
 scp -6 -o StrictHostKeyChecking=no server/static/index.html "${TARGET}:${REMOTE_PATH}/server/static/index.html"
 

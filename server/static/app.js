@@ -549,6 +549,15 @@ async function loadDistributor(){
   const me = await checkRoleAndRedirect('distributor');
   bindLogout();
   
+  // Show staff name if available
+  if(me.name) {
+    const brand = qs('#navbarBrand');
+    if(brand) {
+       if(me.role === 'staff') brand.textContent = `${me.name} Panel`;
+       else brand.textContent = `Distributor Dashboard - ${me.name}`;
+    }
+  }
+  
   if(me.role === 'staff'){
     const p = me.permissions || [];
     window.PERM = p;
@@ -557,17 +566,19 @@ async function loadDistributor(){
        const nav = qs('#nav-'+id); if(nav) hide(nav.parentNode);
     };
     
-    // Hide administrative/advanced sections
-    hideIt('staff');
-    hideIt('reports');
-    hideIt('rates');
-    hideIt('products');
-    hideIt('inventory');
-    
     // Permission based hiding
+    if(!p.includes('products')) hideIt('products');
+    if(!p.includes('inventory')) hideIt('inventory');
+    if(!p.includes('rates')) hideIt('rates');
+    if(!p.includes('reports')) hideIt('reports');
+    if(!p.includes('staff')) hideIt('staff');
+    
     if(!p.includes('stock_in')) hideIt('stock-in');
     if(!p.includes('stock_out')) hideIt('stock-out');
-    if(!(p.includes('add_retailer') || p.includes('payment_cash') || p.includes('payment_online'))) hideIt('retailers');
+    if(!p.includes('stock_wastage')) hideIt('stock-wastage');
+    
+    // Retailers: Show if they have explicit view permission OR any functional permission
+    if(!(p.includes('view_retailers') || p.includes('add_retailer') || p.includes('payment_cash') || p.includes('payment_online'))) hideIt('retailers');
   }
   
   loadDistDashboard();
@@ -870,6 +881,28 @@ async function renderStockIn(editMove = null){
     const saveBtn = qs('#stockInSaveBtn');
     const cashInp = qs('#stockInCash');
     const onlineInp = qs('#stockInOnline');
+    const subtotalEl = qs('#stockInSubtotal');
+
+    const calcTotal = () => {
+        let total = 0;
+        products.forEach(p => {
+             const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
+             const isCompound = u && String(u.type) === 'Compound';
+             const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
+             let qty = 0;
+             if(isCompound){
+               const a = qs(`.in-first[data-id="${p._id}"]`);
+               const b = qs(`.in-second[data-id="${p._id}"]`);
+               qty = (Number(a && a.value || 0)*conv) + (Number(b && b.value || 0));
+             } else {
+               const s = qs(`.in-simple[data-id="${p._id}"]`);
+               qty = Number(s && s.value || 0);
+             }
+             const price = Number(p.price) || 0;
+             total += qty * price;
+        });
+        if(subtotalEl) subtotalEl.textContent = '₹' + total.toFixed(2);
+    };
 
     const updateBalance = () => {
       const sid = sel ? sel.value : '';
@@ -1034,6 +1067,11 @@ async function renderStockIn(editMove = null){
       // Auto-convert listeners
       qsa('.in-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
       qsa('.supout-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
+
+      // Calc Total listeners
+      qsa('.in-first').forEach(i => i.addEventListener('input', calcTotal));
+      qsa('.in-second').forEach(i => i.addEventListener('input', calcTotal));
+      qsa('.in-simple').forEach(i => i.addEventListener('input', calcTotal));
     }
 
     if(editMove){
@@ -1062,6 +1100,9 @@ async function renderStockIn(editMove = null){
        }
        // Hide other rows or disable inputs? Maybe just leave them.
     }
+    
+    // Initial Calc
+    calcTotal();
 
     if(saveBtn){
       const handler = async (ev) => {
@@ -1363,6 +1404,8 @@ async function renderStockOut(initialState = null){
     let rrMap = {};
     let dailyMovesMap = {};
     let dailyTxnsMap = {};
+    let initialNet = 0;
+    let lastCalculatedNet = 0;
     const dirtyProductIds = new Set();
     const dirtyPaymentTypes = new Set();
 
@@ -1379,7 +1422,9 @@ async function renderStockOut(initialState = null){
     const updateBalance = () => {
       if(!balEl || !rSel) return;
       const r = retailers.find(x=>x._id === rSel.value);
-      const bal = r ? (Number(r.currentBalance)||0) : 0; 
+      const base = r ? (Number(r.currentBalance)||0) : 0; 
+      const delta = lastCalculatedNet - initialNet;
+      const bal = base + delta;
       balEl.textContent = '₹'+bal.toFixed(2); 
       balEl.className = 'fw-bold ' + (bal>0? 'text-danger':'text-success');
     };
@@ -1387,7 +1432,18 @@ async function renderStockOut(initialState = null){
     const fillRetailers = () => {
       const cur = (initialState && initialState.retailerId) ? initialState.retailerId : (rSel ? rSel.value : '');
       if(rSel){
-        rSel.innerHTML = '<option value="">Select retailer</option>' + retailers.map(r=>`<option value="${r._id}">${r.name}</option>`).join('');
+        const sorted = [...retailers].sort((a,b) => {
+            const aActive = a.active !== false;
+            const bActive = b.active !== false;
+            if(aActive && !bActive) return -1;
+            if(!aActive && bActive) return 1;
+            return (a.sortOrder||0) - (b.sortOrder||0) || a.name.localeCompare(b.name);
+        });
+        
+        rSel.innerHTML = '<option value="">Select retailer</option>' + sorted.map(r=>{
+             const isActive = r.active !== false;
+             return `<option value="${r._id}" ${!isActive ? 'class="text-muted bg-light"' : ''}>${r.name}${!isActive?' (Inactive)':''}</option>`;
+        }).join('');
         if(cur) rSel.value = cur;
         updateBalance();
       }
@@ -1456,6 +1512,9 @@ async function renderStockOut(initialState = null){
       const online = Number(onlineInp && onlineInp.value || 0);
       const receivable = Math.max(0, subtotal - cash - online);
       if(recvEl) recvEl.textContent = '₹' + receivable.toFixed(2);
+      
+      lastCalculatedNet = subtotal - cash - online;
+      updateBalance();
     };
 
     const onInput = () => computeTotalAndAmounts();
@@ -1530,6 +1589,9 @@ async function renderStockOut(initialState = null){
         const d = dateInput ? dateInput.value : null;
         const rid = rSel ? rSel.value : null;
         
+        initialNet = 0;
+        lastCalculatedNet = 0;
+
         if (clearDirty) {
             dirtyProductIds.clear();
             dirtyPaymentTypes.clear();
@@ -1542,7 +1604,12 @@ async function renderStockOut(initialState = null){
         dailyMovesMap = {};
         dailyTxnsMap = {};
         
-        if(!d || !rid) { computeTotalAndAmounts(); return; }
+        if(!d || !rid) { 
+            computeTotalAndAmounts(); 
+            initialNet = lastCalculatedNet;
+            updateBalance();
+            return; 
+        }
         
         try {
             const from = new Date(d); from.setHours(0,0,0,0);
@@ -1631,6 +1698,8 @@ async function renderStockOut(initialState = null){
             }
             
             computeTotalAndAmounts();
+            initialNet = lastCalculatedNet;
+            updateBalance();
         } catch(e) { console.error('Error loading daily data', e); throw e; }
     };
     
@@ -1640,6 +1709,8 @@ async function renderStockOut(initialState = null){
 
     if(rSel){
       rSel.onchange = async () => {
+        initialNet = 0;
+        lastCalculatedNet = 0;
         updateBalance();
         await loadRetailerRates();
         renderRows();
@@ -2053,8 +2124,9 @@ function loadRetailers(){
   api('/api/my/retailers').then(retailers => {
     list.innerHTML = '';
     retailers.forEach(r => {
-      const div = document.createElement('div');
+      const div = document.createElement('li');
       div.className = 'list-group-item d-flex justify-content-between align-items-center';
+      const isActive = r.active !== false;
       const canPay = ROLE !== 'staff' || perms.includes('payment_cash') || perms.includes('payment_online');
       const canEdit = ROLE !== 'staff' || perms.includes('add_retailer');
       const payBtnHtml = canPay ? `<button class="btn btn-sm btn-outline-primary" onclick="preparePayment('${r._id}', '${r.name}', ${r.currentBalance||0})" data-bs-toggle="modal" data-bs-target="#paymentModal" title="Payment"><i class="bi bi-currency-rupee"></i></button>` : '';
@@ -2063,13 +2135,17 @@ function loadRetailers(){
       
       div.innerHTML = `
         <div>
-          <div class="fw-bold">${r.name}</div>
+          <div class="fw-bold ${isActive ? '' : 'text-decoration-line-through text-muted'}">${r.name} ${isActive ? '' : '<span class="badge bg-danger">Inactive</span>'}</div>
           <div class="small text-muted">${r.phone || ''}</div>
           <div class="small">${r.address || ''}</div>
         </div>
         <div class="d-flex flex-column align-items-end gap-1">
           <div class="fw-bold ${r.currentBalance > 0 ? 'text-danger' : 'text-success'}">₹${(r.currentBalance||0).toFixed(2)}</div>
-          <div class="d-flex gap-1">
+          <div class="d-flex gap-1 align-items-center">
+             ${ROLE === 'distributor' ? `
+             <div class="form-check form-switch me-2" title="Active/Inactive">
+                <input class="form-check-input" type="checkbox" ${isActive ? 'checked' : ''} data-act="toggle-active" data-id="${r._id}">
+             </div>` : ''}
              <button class="btn btn-sm btn-outline-info" data-act="ledger" data-id="${r._id}" title="Ledger"><i class="bi bi-journal-text"></i></button>
              ${editBtnHtml}
              ${adjBtnHtml}
@@ -2082,6 +2158,24 @@ function loadRetailers(){
     
     list.onclick = async (ev)=>{
       const t = ev.target;
+      
+      // Handle Toggle Switch
+      if(t.classList.contains('form-check-input') && t.dataset.act === 'toggle-active'){
+          const id = t.dataset.id;
+          const newState = t.checked;
+          try {
+              await api(`/api/my/retailers/${id}/status`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ active: newState })
+              });
+              loadRetailers(); // Reload to update UI
+          } catch(e) {
+              t.checked = !newState; // Revert
+              alert('Failed to update status: ' + e.message);
+          }
+          return;
+      }
+
       const btn = t.closest('button');
       if(!btn) return;
       const id = btn.getAttribute('data-id');
@@ -2432,6 +2526,9 @@ async function renderReport(){
       header = ['Date','Type','Product','Party / Note','Qty'];
       if(thead) thead.innerHTML = '<tr><th>Date</th><th>T</th><th>Prod</th><th>Party / Note</th><th class="text-end">Qty</th></tr>';
       let totalStockQty = 0;
+      let totalIn = 0;
+      let totalOut = 0;
+
       if(tbody){ tbody.innerHTML=''; items.forEach(m=>{
         const date = new Date(m.createdAt);
         const ds = date.toLocaleDateString()+' '+date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -2475,6 +2572,8 @@ async function renderReport(){
         if(search && !rowText.includes(search)) return;
         
         totalStockQty += qty;
+        if(m.type === 'IN') totalIn += qty;
+        else totalOut += qty;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${ds}</td><td><span class="badge ${m.type==='IN'?'bg-success':'bg-primary'}">${m.type}</span></td><td><a href="#" onclick="showProductDetails('${pId}'); return false;">${prod}</a></td><td>${party}</td><td class="text-end">${qtyDisplay}</td>`;
@@ -2485,7 +2584,7 @@ async function renderReport(){
       if(data.length > 0) {
           const tr = document.createElement('tr');
           tr.className = 'table-light fw-bold';
-          tr.innerHTML = `<td colspan="4">Total (Base Units)</td><td class="text-end">${totalStockQty}</td>`;
+          tr.innerHTML = `<td colspan="4">Total: IN ${totalIn} | OUT ${totalOut} (Net: ${totalIn - totalOut})</td><td class="text-end">${totalStockQty} (Activity)</td>`;
           tbody.appendChild(tr);
       }
       }
@@ -2636,8 +2735,8 @@ async function renderReport(){
       }
       }
     } else if(cat === 'financial'){
-      header = ['Date','Retailer','Op Balance','StockOut Amount','Payment Received','Cl Balance'];
-      if(thead) thead.innerHTML = '<tr><th>Date</th><th>Retailer</th><th class="text-end">Op Balance</th><th class="text-end">StockOut Amount</th><th class="text-end">Payment Received</th><th class="text-end">Cl Balance</th></tr>';
+      header = ['Retailer','Op Balance','StockOut Amount','Payment Received','Cl Balance'];
+      if(thead) thead.innerHTML = '<tr><th>Retailer</th><th class="text-end">Op Balance</th><th class="text-end">StockOut Amount</th><th class="text-end">Payment Received</th><th class="text-end">Cl Balance</th></tr>';
       
       const currentBals = {...rBalMap};
       const agg = {};
@@ -2664,6 +2763,7 @@ async function renderReport(){
           if(rId){
               if(!agg[rId]){
                   agg[rId] = {
+                      id: rId,
                       name: retName,
                       sortOrder: rSortMap[rId] || 0,
                       clBal: clBal, // First time seen = Balance at End of Period
@@ -2680,6 +2780,11 @@ async function renderReport(){
               agg[rId].opBal = opBal;
           }
       });
+
+      let totOp = 0;
+      let totStockOut = 0;
+      let totPay = 0;
+      let totCl = 0;
 
       if(tbody){ 
         tbody.innerHTML='';
@@ -2698,11 +2803,27 @@ async function renderReport(){
             // We show all active retailers in the period.
             if(search && !row.name.toLowerCase().includes(search)) return;
 
+            totOp += row.opBal;
+            totStockOut += row.stockOut;
+            totPay += row.payment;
+            totCl += row.clBal;
+
+            const stockOutHtml = row.stockOut !== 0 
+               ? `<a href="#" onclick="showStockOutDetails('${row.id}', '${encodeURIComponent(row.name)}', '${from||''}', '${to||''}'); return false;">₹${row.stockOut.toFixed(2)}</a>` 
+               : `₹0.00`;
+
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${dateRange}</td><td>${row.name}</td><td class="text-end">₹${row.opBal.toFixed(2)}</td><td class="text-end">₹${row.stockOut.toFixed(2)}</td><td class="text-end">₹${row.payment.toFixed(2)}</td><td class="text-end">₹${row.clBal.toFixed(2)}</td>`;
+            tr.innerHTML = `<td>${row.name}</td><td class="text-end">₹${row.opBal.toFixed(2)}</td><td class="text-end">${stockOutHtml}</td><td class="text-end">₹${row.payment.toFixed(2)}</td><td class="text-end">₹${row.clBal.toFixed(2)}</td>`;
             tbody.appendChild(tr);
-            data.push([dateRange, row.name, row.opBal.toFixed(2), row.stockOut.toFixed(2), row.payment.toFixed(2), row.clBal.toFixed(2)]);
+            data.push([row.name, row.opBal.toFixed(2), row.stockOut.toFixed(2), row.payment.toFixed(2), row.clBal.toFixed(2)]);
         });
+
+        if(data.length > 0) {
+            const tr = document.createElement('tr');
+            tr.className = 'table-light fw-bold';
+            tr.innerHTML = `<td>Total</td><td class="text-end">₹${totOp.toFixed(2)}</td><td class="text-end">₹${totStockOut.toFixed(2)}</td><td class="text-end">₹${totPay.toFixed(2)}</td><td class="text-end">₹${totCl.toFixed(2)}</td>`;
+            tbody.appendChild(tr);
+        }
       }
 
     } else if(cat === 'retailer_ledger'){
@@ -3660,39 +3781,179 @@ async function openEditStockMove(id){
 async function saveStockEdit(){ ... }
 */
 
+let currentAdjBaseBalance = 0;
+
+const updateAdjDynamicBalance = () => {
+  const balEl = qs('#adjCurrentBalance');
+  const inputEl = qs('#adjAmount');
+  const btn = qs('#adjSave');
+  if(!balEl || !inputEl) return;
+
+  const val = Number(inputEl.value) || 0;
+  
+  let base = currentAdjBaseBalance;
+  
+  // If editing, subtract the original amount of the transaction being edited
+  if(btn && btn.dataset.id && window.currentAdjustments){
+      const tx = window.currentAdjustments.find(t => t._id === btn.dataset.id);
+      if(tx){
+          base -= (tx.amount || 0);
+      }
+  }
+  
+  const newBal = base + val;
+  balEl.textContent = '₹ ' + newBal.toFixed(2);
+  balEl.className = 'fw-bold ' + (newBal>0 ? 'text-danger' : 'text-success');
+};
+
 function prepareAdjustment(id, name, currentBalance){
   const nameEl = qs('#adjRetailerName');
   if(nameEl) nameEl.textContent = name;
   qs('#adjRetailerId').value = id;
   qs('#adjAmount').value = '';
   qs('#adjNote').value = '';
-  const balEl = qs('#adjCurrentBalance');
-  if(balEl) {
-     const bal = Number(currentBalance)||0;
-     balEl.textContent = '₹ ' + bal.toFixed(2);
-     balEl.className = 'fw-bold ' + (bal>0 ? 'text-danger' : 'text-success');
+  
+  // Reset date to today and clear edit mode
+  const today = new Date().toISOString().split('T')[0];
+  const dateEl = qs('#adjDate');
+  if(dateEl) dateEl.value = today;
+  
+  const btn = qs('#adjSave');
+  if(btn) {
+      btn.textContent = 'Save';
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-warning');
+      btn.dataset.id = '';
   }
+
+  currentAdjBaseBalance = Number(currentBalance)||0;
+  updateAdjDynamicBalance();
+  
+  // Load history
+  if(window.loadAdjustmentHistory) window.loadAdjustmentHistory(id, today);
 }
+
+window.loadAdjustmentHistory = async function(retailerId, dateStr) {
+    const tbody = qs('#adjHistoryRows');
+    if(!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center">Loading...</td></tr>';
+    
+    try {
+        const txs = await api(`/api/my/transactions?retailerId=${retailerId}&type=adjustment&from=${dateStr}&to=${dateStr}`);
+        tbody.innerHTML = '';
+        if(txs.length === 0){
+             tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No adjustments found on this date.</td></tr>';
+             return;
+        }
+        
+        // Sort by creation time desc
+        txs.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        txs.forEach(tx => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+               <td>${new Date(tx.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+               <td>${tx.note || '-'}</td>
+               <td class="text-end ${tx.amount > 0 ? 'text-danger' : 'text-success'}">₹${tx.amount.toFixed(2)}</td>
+               <td class="text-end">
+                   <button class="btn btn-sm btn-outline-primary me-1" onclick="window.editAdjustment('${tx._id}')"><i class="bi bi-pencil"></i></button>
+                   <button class="btn btn-sm btn-outline-danger" onclick="window.deleteAdjustment('${tx._id}')"><i class="bi bi-trash"></i></button>
+               </td>
+            `;
+            tbody.appendChild(tr);
+        });
+        // Store for editing lookup
+        window.currentAdjustments = txs;
+    } catch(e) {
+        console.error(e);
+        tbody.innerHTML = '<tr><td colspan="4" class="text-danger">Failed to load history</td></tr>';
+    }
+};
+
+window.editAdjustment = function(id) {
+    const tx = window.currentAdjustments && window.currentAdjustments.find(t => t._id === id);
+    if(!tx) return;
+    
+    qs('#adjAmount').value = tx.amount;
+    qs('#adjNote').value = tx.note || '';
+    // Keep the date as selected, or update if tx has different date (unlikely with filter)
+    
+    const btn = qs('#adjSave');
+    btn.textContent = 'Update';
+    btn.classList.remove('btn-warning');
+    btn.classList.add('btn-primary');
+    btn.dataset.id = id;
+};
+
+window.deleteAdjustment = async function(id) {
+    if(!confirm('Delete this adjustment? Balance will be reverted.')) return;
+    try {
+        await api(`/api/my/transactions/${id}`, { method: 'DELETE' });
+        window.loadAdjustmentHistory(qs('#adjRetailerId').value, qs('#adjDate').value);
+        loadRetailers(); 
+    } catch(e) {
+        alert(e.message);
+    }
+};
 
 function bindAdjustmentForm(){
   const btn = qs('#adjSave');
+  const dateEl = qs('#adjDate');
+  const amtEl = qs('#adjAmount');
+  
+  if(amtEl){
+      amtEl.addEventListener('input', updateAdjDynamicBalance);
+  }
+  
+  if(dateEl) {
+      dateEl.onchange = () => {
+          const rid = qs('#adjRetailerId').value;
+          if(rid) window.loadAdjustmentHistory(rid, dateEl.value);
+      };
+  }
+
   if(btn){
     btn.onclick = async () => {
       try {
         const retailerId = qs('#adjRetailerId').value;
         const amount = qs('#adjAmount').value;
         const note = qs('#adjNote').value;
+        const date = qs('#adjDate').value;
+        const txId = btn.dataset.id;
         
         if(!amount) throw new Error('Invalid amount');
         const amtVal = Number(amount);
         if(isNaN(amtVal) || amtVal === 0) throw new Error('Amount cannot be zero');
+        if(!date) throw new Error('Date is required');
 
-        await api('/api/my/retailer-adjustment', {
-          method: 'POST',
-          body: JSON.stringify({ retailerId, amount: amtVal, note })
-        });
+        if(txId) {
+            // Update
+            await api(`/api/my/transactions/${txId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ amount: amtVal, note, date })
+            });
+            alert('Adjustment updated');
+            
+            // Reset to create mode
+            btn.textContent = 'Save';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-warning');
+            btn.dataset.id = '';
+            qs('#adjAmount').value = '';
+            qs('#adjNote').value = '';
+
+        } else {
+            // Create
+            await api('/api/my/retailer-adjustment', {
+              method: 'POST',
+              body: JSON.stringify({ retailerId, amount: amtVal, note, date })
+            });
+            alert('Adjustment recorded');
+            qs('#adjAmount').value = '';
+            qs('#adjNote').value = '';
+        }
         
-        alert('Adjustment recorded');
+        window.loadAdjustmentHistory(retailerId, date);
         loadRetailers();
       } catch(e){
         alert(e.message);
@@ -3700,3 +3961,119 @@ function bindAdjustmentForm(){
     };
   }
 }
+
+window.showStockOutDetails = async function(retailerId, encodedName, from, to) {
+    const name = decodeURIComponent(encodedName);
+    
+    // 1. Create Modal if not exists
+    let modal = qs('#stockOutDetailModal');
+    if (!modal) {
+        document.body.insertAdjacentHTML('beforeend', `
+            <div class="modal fade" id="stockOutDetailModal" tabindex="-1" style="z-index: 10000;">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Stock Out Details</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <h6 id="sodTitle" class="mb-3"></h6>
+                            <div class="table-responsive" style="max-height: 400px;">
+                                <table class="table table-sm table-striped mb-0">
+                                    <thead><tr><th>Time</th><th>Note</th><th class="text-end">Amount</th></tr></thead>
+                                    <tbody id="sodRows"></tbody>
+                                    <tfoot id="sodFooter"></tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+        modal = qs('#stockOutDetailModal');
+    }
+    
+    // 2. Show Modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+    
+    qs('#sodTitle').textContent = `${name} (${from || 'Start'} - ${to || 'Now'})`;
+    const tbody = qs('#sodRows');
+    const tfoot = qs('#sodFooter');
+    tbody.innerHTML = '<tr><td colspan="3" class="text-center">Loading...</td></tr>';
+    tfoot.innerHTML = '';
+
+    // 3. Fetch Data
+    try {
+        const params = new URLSearchParams({
+            retailerId,
+            type: 'order',
+            populateOrders: 'true'
+        });
+        if(from) params.append('from', from);
+        if(to) params.append('to', to);
+        
+        const txs = await api(`/api/my/transactions?${params.toString()}`);
+        
+        // 4. Render
+        tbody.innerHTML = '';
+        if(txs.length === 0){
+             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No records found.</td></tr>';
+             return;
+        }
+        
+        let total = 0;
+        // Sort DESC
+        txs.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        txs.forEach(tx => {
+            console.log('StockOut TX:', tx);
+            total += tx.amount;
+            const d = new Date(tx.createdAt);
+            const ds = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            
+            let detailsHtml = '';
+            if (tx.referenceId && Array.isArray(tx.referenceId.items) && tx.referenceId.items.length > 0) {
+                detailsHtml = '<div class="mt-2"><table class="table table-bordered table-sm small mb-0 bg-white" style="font-size: 0.85em;">';
+                detailsHtml += '<thead class="table-light"><tr><th>Product</th><th class="text-end">Qty</th><th class="text-end">Rate</th><th class="text-end">Total</th></tr></thead><tbody>';
+                tx.referenceId.items.forEach(item => {
+                    const pObj = item.productId || {};
+                    const pName = (typeof pObj === 'object' && (pObj.nameEnglish || pObj.nameHindi)) 
+                                  ? (pObj.nameEnglish || pObj.nameHindi) 
+                                  : 'Unknown Product';
+                    const qty = item.quantity;
+                    const price = item.price;
+                    const sub = qty * price;
+                    detailsHtml += `<tr><td>${pName}</td><td class="text-end">${qty}</td><td class="text-end">₹${price.toFixed(2)}</td><td class="text-end">₹${sub.toFixed(2)}</td></tr>`;
+                });
+                detailsHtml += '</tbody></table></div>';
+            } else {
+                 if(tx.amount > 0) {
+                     detailsHtml = '<div class="mt-1 text-muted small fst-italic">Order details not available.</div>';
+                 }
+            }
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="vertical-align: top;">${ds}</td>
+                <td style="vertical-align: top;">
+                    <div class="fw-bold">${tx.note || 'Stock Out'}</div>
+                    ${detailsHtml}
+                </td>
+                <td class="text-end fw-bold" style="vertical-align: top;">₹${tx.amount.toFixed(2)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+        
+        tfoot.innerHTML = `
+            <tr class="fw-bold table-light">
+                <td colspan="2">Total</td>
+                <td class="text-end">₹${total.toFixed(2)}</td>
+            </tr>
+        `;
+        
+    } catch(e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="3" class="text-danger">Error: ${e.message}</td></tr>`;
+    }
+};
