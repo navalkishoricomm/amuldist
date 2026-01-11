@@ -1421,7 +1421,8 @@ app.get('/api/debug/fix-ledger', auth, requireDistributorOrStaff(null), async (r
     const moves = await StockMove.find({ 
         distributorId: ctx.distributorId, 
         type: 'OUT',
-        createdAt: { $gte: startOfDay } 
+        createdAt: { $gte: startOfDay },
+        retailerId: { $exists: true, $ne: null }
     }).sort({ createdAt: 1 });
 
     let fixedCount = 0;
