@@ -754,6 +754,19 @@ async function renderHiddenProducts(selector){
 async function renderInventoryStatus(){
   try {
     const products = await api('/api/products');
+
+    // Fetch product stats for sorting
+    try {
+        const stats = await api('/api/my/product-stats');
+        const statMap = {};
+        stats.forEach(s => statMap[s._id] = s.movement);
+        products.sort((a, b) => {
+            const mA = statMap[a._id] || 0;
+            const mB = statMap[b._id] || 0;
+            return mB - mA;
+        });
+    } catch(e) { console.error('Failed to sort products', e); }
+
     const inv = await api('/api/my/inventory');
     const units = await api('/api/units');
     const unitMap = {}; units.forEach(u => unitMap[u._id] = u);
@@ -1211,6 +1224,17 @@ async function renderStockIn(editMove = null){
 async function renderStockWastage(){
   try {
     const products = await api('/api/my/products');
+    // Fetch product stats for sorting
+    try {
+        const stats = await api('/api/my/product-stats');
+        const statMap = {};
+        stats.forEach(s => statMap[s._id] = s.movement);
+        products.sort((a, b) => {
+            const mA = statMap[a._id] || 0;
+            const mB = statMap[b._id] || 0;
+            return mB - mA;
+        });
+    } catch(e) { console.error('Failed to sort products', e); }
     const units = await api('/api/units');
     const unitMap = {}; units.forEach(u => unitMap[u._id] = u);
     const inv = await api('/api/my/inventory');
@@ -2940,6 +2964,17 @@ async function renderRatesTable(){
   
   try {
     const products = await api('/api/my/products');
+    // Fetch product stats for sorting
+    try {
+        const stats = await api('/api/my/product-stats');
+        const statMap = {};
+        stats.forEach(s => statMap[s._id] = s.movement);
+        products.sort((a, b) => {
+            const mA = statMap[a._id] || 0;
+            const mB = statMap[b._id] || 0;
+            return mB - mA;
+        });
+    } catch(e) { console.error('Failed to sort products', e); }
     const distRates = await api('/api/my/rates');
     let retailerRates = [];
     if(retailerId){
