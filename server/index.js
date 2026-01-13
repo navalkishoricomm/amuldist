@@ -46,6 +46,9 @@ const productSchema = new mongoose.Schema(
   {
     nameEnglish: { type: String, required: true, trim: true, unique: true },
     nameHindi: { type: String, required: true, trim: true },
+    baseName: { type: String, trim: true },
+    variantName: { type: String, trim: true },
+    variantGroup: { type: String, trim: true },
     active: { type: Boolean, default: true },
     unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit' },
     price: { type: Number, default: 0 },
@@ -54,12 +57,12 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.pre('save', function () {
-  this.nameHindi = this.nameEnglish;
+  if (!this.nameHindi) this.nameHindi = this.nameEnglish;
 });
 
 productSchema.pre('findOneAndUpdate', function () {
   const update = this.getUpdate() || {};
-  if (update.nameEnglish) update.nameHindi = update.nameEnglish;
+  if (update.nameEnglish && !update.nameHindi) update.nameHindi = update.nameEnglish;
 });
 
 const Product = mongoose.model('Product', productSchema);
@@ -117,6 +120,9 @@ const distProductSchema = new mongoose.Schema(
     distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     nameEnglish: { type: String, required: true, trim: true },
     nameHindi: { type: String, required: true, trim: true },
+    baseName: { type: String, trim: true },
+    variantName: { type: String, trim: true },
+    variantGroup: { type: String, trim: true },
     active: { type: Boolean, default: true },
     unit: { type: mongoose.Schema.Types.ObjectId, ref: 'Unit' },
     price: { type: Number, default: 0 },
@@ -124,8 +130,8 @@ const distProductSchema = new mongoose.Schema(
   { timestamps: true }
 );
 distProductSchema.index({ distributorId: 1, nameEnglish: 1 }, { unique: true });
-distProductSchema.pre('save', function () { this.nameHindi = this.nameEnglish; });
-distProductSchema.pre('findOneAndUpdate', function () { const u = this.getUpdate() || {}; if (u.nameEnglish) u.nameHindi = u.nameEnglish; });
+distProductSchema.pre('save', function () { if (!this.nameHindi) this.nameHindi = this.nameEnglish; });
+distProductSchema.pre('findOneAndUpdate', function () { const u = this.getUpdate() || {}; if (u.nameEnglish && !u.nameHindi) u.nameHindi = u.nameEnglish; });
 const DistProduct = mongoose.model('DistProduct', distProductSchema);
 
 const distProductHideSchema = new mongoose.Schema(
@@ -833,18 +839,64 @@ app.get('/api/products', auth, requireReadAccess, async (req, res) => {
 
 app.post('/api/products', auth, requireAdminOrDistributor, async (req, res) => {
   try {
-    const { nameEnglish, unit } = req.body;
-    if (!nameEnglish) return res.status(400).json({ error: 'nameEnglish is required' });
+    const { nameEnglish, nameHindi, baseName, variantName, variantGroup, unit, price } = req.body;
+    
+    let finalName = nameEnglish;
+    if (!finalName && baseName) {
+       finalName = baseName;
+       if (variantName) finalName += ' ' + variantName;
+    }
+
+    if (!finalName) return res.status(400).json({ error: 'nameEnglish is required' });
     let unitId;
     if (unit !== undefined && unit !== null && unit !== '') {
       try { unitId = new mongoose.Types.ObjectId(String(unit)); } catch { return res.status(400).json({ error: 'invalid unit id' }); }
     }
-    const p = await Product.create({ nameEnglish, nameHindi: nameEnglish, active: true, unit: unitId });
-    try { await GlobalRate.updateOne({ productId: p._id }, { $set: { productId: p._id, price: 100 } }, { upsert: true }); } catch {}
+    
+    const p = await Product.create({ 
+        nameEnglish: finalName, 
+        nameHindi: nameHindi || finalName, 
+        baseName,
+        variantName,
+        variantGroup,
+        active: true, 
+        unit: unitId,
+        price: Number(price)||0
+    });
+    
+    try { await GlobalRate.updateOne({ productId: p._id }, { $set: { productId: p._id, price: Number(price)||100 } }, { upsert: true }); } catch {}
     res.status(201).json(p);
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'nameEnglish already exists' });
     res.status(500).json({ error: String(err && err.message ? err.message : 'Failed to create product') });
+  }
+});
+
+app.put('/api/products/:id', auth, requireAdminOrDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nameEnglish, nameHindi, baseName, variantName, variantGroup, unit, price, active } = req.body;
+    
+    const update = {};
+    if(nameEnglish) update.nameEnglish = nameEnglish;
+    if(nameHindi) update.nameHindi = nameHindi;
+    if(baseName !== undefined) update.baseName = baseName;
+    if(variantName !== undefined) update.variantName = variantName;
+    if(variantGroup !== undefined) update.variantGroup = variantGroup;
+    if(unit !== undefined) {
+         if(unit === '' || unit === null) update.unit = null;
+         else update.unit = new mongoose.Types.ObjectId(String(unit));
+    }
+    if(price !== undefined) update.price = Number(price);
+    if(active !== undefined) update.active = Boolean(active);
+
+    const p = await Product.findByIdAndUpdate(id, update, { new: true });
+    if(!p) return res.status(404).json({error: 'Product not found'});
+    
+    res.json(p);
+  } catch(err) {
+      if (err && err.code === 11000) return res.status(409).json({ error: 'nameEnglish already exists' });
+      res.status(500).json({ error: 'Failed to update product' });
   }
 });
 
@@ -866,7 +918,7 @@ app.get('/api/products/:id', auth, requireReadAccess, async (req, res) => {
 app.patch('/api/products/:id', auth, requireAdminOrDistributor, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nameEnglish, active, unit } = req.body;
+    const { nameEnglish, active, unit, baseName, variantName, variantGroup, nameHindi } = req.body;
     
     const existing = await Product.findById(id);
     if (!existing) return res.status(404).json({ error: 'product not found' });
@@ -884,8 +936,25 @@ app.patch('/api/products/:id', auth, requireAdminOrDistributor, async (req, res)
     const update = {};
     // Only admin can change name or active status of global products usually, 
     // but existing logic allowed it? Let's keep existing broad permission but restrict unit.
-    if (nameEnglish !== undefined) update.nameEnglish = nameEnglish;
     if (active !== undefined) update.active = active;
+    
+    // Handle name updates
+    if (nameEnglish !== undefined) {
+         update.nameEnglish = nameEnglish;
+    } else if (baseName !== undefined || variantName !== undefined) {
+         // If base/variant changed but nameEnglish not provided, try to reconstruct
+         const newBase = baseName !== undefined ? baseName : existing.baseName;
+         const newVar = variantName !== undefined ? variantName : existing.variantName;
+         if (newBase) {
+            update.nameEnglish = newBase;
+            if (newVar) update.nameEnglish += ' ' + newVar;
+         }
+    }
+
+    if (nameHindi !== undefined) update.nameHindi = nameHindi;
+    if (baseName !== undefined) update.baseName = baseName;
+    if (variantName !== undefined) update.variantName = variantName;
+    if (variantGroup !== undefined) update.variantGroup = variantGroup;
     
     if (unit !== undefined) {
       if (unit === null || unit === '') {
@@ -1110,9 +1179,24 @@ app.get('/api/my/products', auth, requireDistributorOrStaff(null), async (req, r
     const grMap = {};
     globalRates.forEach(r => grMap[String(r.productId)] = r.price);
 
+    const distRates = await Rate.find({ distributorId: req.user._id });
+    const drMap = {};
+    distRates.forEach(r => drMap[String(r.productId)] = r.price);
+
     const items = [
-      ...globals.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: grMap[String(p._id)] || p.price || 0, source: 'global' })),
-      ...custom.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price || 0, source: 'custom' })),
+      ...globals.map((p) => ({ 
+          _id: p._id, 
+          nameEnglish: p.nameEnglish, 
+          nameHindi: p.nameHindi, 
+          active: p.active, 
+          unit: p.unit, 
+          price: drMap[String(p._id)] !== undefined ? drMap[String(p._id)] : (grMap[String(p._id)] || p.price || 0), 
+          baseName: p.baseName, 
+          variantName: p.variantName, 
+          variantGroup: p.variantGroup, 
+          source: 'global' 
+      })),
+      ...custom.map((p) => ({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price || 0, baseName: p.baseName, variantName: p.variantName, variantGroup: p.variantGroup, source: 'custom' })),
     ];
     res.json(items);
   } catch (err) {
@@ -1146,14 +1230,31 @@ app.get('/api/my/inventory', auth, requireDistributorOrStaff(null), async (req, 
 
 app.post('/api/my/products', auth, requireDistributor, async (req, res) => {
   try {
-    const { nameEnglish, unit, price } = req.body;
-    if (!nameEnglish) return res.status(400).json({ error: 'nameEnglish is required' });
+    let { nameEnglish, unit, price, baseName, variantName, variantGroup } = req.body;
+    if (!nameEnglish) {
+       if(baseName) {
+         nameEnglish = baseName;
+         if(variantName) nameEnglish += ' ' + variantName;
+       } else {
+         return res.status(400).json({ error: 'nameEnglish is required' });
+       }
+    }
     let unitId;
     if (unit !== undefined && unit !== null && unit !== '') {
       try { unitId = new mongoose.Types.ObjectId(String(unit)); } catch { return res.status(400).json({ error: 'invalid unit id' }); }
     }
-    const p = await DistProduct.create({ distributorId: req.user._id, nameEnglish, nameHindi: nameEnglish, active: true, unit: unitId, price: Number(price) || 0 });
-    res.status(201).json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, source: 'custom' });
+    const p = await DistProduct.create({ 
+        distributorId: req.user._id, 
+        nameEnglish, 
+        nameHindi: nameEnglish, 
+        active: true, 
+        unit: unitId, 
+        price: Number(price) || 0,
+        baseName,
+        variantName,
+        variantGroup
+    });
+    res.status(201).json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, baseName: p.baseName, variantName: p.variantName, variantGroup: p.variantGroup, source: 'custom' });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'nameEnglish already exists' });
     res.status(500).json({ error: 'Failed to create my product' });
@@ -1163,10 +1264,29 @@ app.post('/api/my/products', auth, requireDistributor, async (req, res) => {
 app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => {
   try {
     const { id } = req.params;
-    const { unit, price } = req.body;
+    let { unit, price, nameEnglish, baseName, variantName, variantGroup } = req.body;
     const pid = new mongoose.Types.ObjectId(String(id));
     const custom = await DistProduct.findOne({ _id: pid, distributorId: req.user._id });
-    if (!custom) return res.status(404).json({ error: 'product not found' });
+    
+    if (!custom) {
+        // Check if it is a global product
+        const globalProd = await Product.findById(pid);
+        if (globalProd) {
+            // It's a global product. Distributor can only update PRICE (stored in Rate)
+            // or maybe active (hide/unhide - handled by other endpoint, but we can support it here too if needed, but stick to price for now)
+            if (price !== undefined) {
+                const newPrice = Number(price) || 0;
+                await Rate.findOneAndUpdate(
+                    { distributorId: req.user._id, productId: pid },
+                    { $set: { price: newPrice } },
+                    { upsert: true, new: true }
+                );
+                return res.json({ _id: globalProd._id, price: newPrice, source: 'global' });
+            }
+            return res.status(400).json({ error: 'For global products, only price can be updated via this endpoint' });
+        }
+        return res.status(404).json({ error: 'product not found' });
+    }
     
     // Restriction: Unit cannot be changed once set
     if (unit !== undefined && custom.unit) {
@@ -1179,6 +1299,26 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
 
     const update = {};
     if (price !== undefined) update.price = Number(price) || 0;
+    
+    // Handle name updates
+    if (nameEnglish !== undefined) {
+         update.nameEnglish = nameEnglish;
+         update.nameHindi = nameEnglish;
+    } else if (baseName !== undefined || variantName !== undefined) {
+         // If base/variant changed but nameEnglish not provided, try to reconstruct
+         const newBase = baseName !== undefined ? baseName : custom.baseName;
+         const newVar = variantName !== undefined ? variantName : custom.variantName;
+         if (newBase) {
+            update.nameEnglish = newBase;
+            if (newVar) update.nameEnglish += ' ' + newVar;
+            update.nameHindi = update.nameEnglish;
+         }
+    }
+
+    if (baseName !== undefined) update.baseName = baseName;
+    if (variantName !== undefined) update.variantName = variantName;
+    if (variantGroup !== undefined) update.variantGroup = variantGroup;
+
     if (unit !== undefined) {
       if (unit === null || unit === '') {
         update.unit = null;
@@ -1187,7 +1327,7 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
       }
     }
     const p = await DistProduct.findByIdAndUpdate(custom._id, update, { new: true });
-    res.json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, source: 'custom' });
+    res.json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, baseName: p.baseName, variantName: p.variantName, variantGroup: p.variantGroup, source: 'custom' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update my product' });
   }
@@ -1761,13 +1901,14 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
       .populate('retailerId', 'name sortOrder')
       .populate({
         path: 'productId',
-        select: 'nameEnglish nameHindi unit',
+        select: 'nameEnglish nameHindi baseName variantName variantGroup unit price',
         populate: {
           path: 'unit',
           populate: { path: 'firstUnit secondUnit' }
         }
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
     console.log('Found stock moves:', items.length);
     res.json(items);
   } catch (err) {
@@ -1888,24 +2029,40 @@ app.post('/api/my/retailer-adjustment', auth, requireDistributorOrStaff('payment
   }
 });
 
-// Update Transaction (Adjustment only for now)
-app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
+// Update Transaction (Adjustment, Cash, Online)
+app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
     try {
         const { distributorId } = getContext(req);
         const { amount, note, date } = req.body;
         
         const tx = await Transaction.findOne({ _id: req.params.id, distributorId });
         if(!tx) return res.status(404).json({ error: 'Transaction not found' });
+
+        // Permission check for staff
+        if (req.user.role === 'staff') {
+             const p = req.user.permissions || [];
+             if (tx.type === 'payment_cash' && !p.includes('payment_cash')) return res.status(403).json({ error: 'Permission denied' });
+             if (tx.type === 'payment_online' && !p.includes('payment_online')) return res.status(403).json({ error: 'Permission denied' });
+             // For adjustment, we might need a specific permission, or allow if they have payment permissions?
+             // For now, let's assume if they can access the UI, they can edit adjustment if they created it?
+             // Or maybe we don't restrict adjustment editing for staff yet beyond general access.
+        }
         
-        if(tx.type !== 'adjustment') return res.status(400).json({ error: 'Only adjustments can be edited' });
+        if(!['adjustment', 'payment_cash', 'payment_online'].includes(tx.type)) {
+             return res.status(400).json({ error: 'Only adjustments and payments can be edited' });
+        }
         
         const oldAmount = tx.amount;
         const newAmount = amount !== undefined ? Number(amount) : oldAmount;
         
         if(amount !== undefined){
-            // Revert old amount from balance, apply new amount
-            // Balance = Balance - Old + New
-            const diff = newAmount - oldAmount;
+            let diff = 0;
+            if(tx.type === 'adjustment') {
+                 diff = newAmount - oldAmount;
+            } else {
+                 // Payment: Balance = Balance + Old - New (Inverse effect)
+                 diff = oldAmount - newAmount;
+            }
             await User.updateOne({ _id: tx.retailerId }, { $inc: { currentBalance: diff } });
             tx.amount = newAmount;
         }
@@ -1921,20 +2078,34 @@ app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff('payment_cas
     }
 });
 
-// Delete Transaction (Adjustment only for now)
-app.delete('/api/my/transactions/:id', auth, requireDistributorOrStaff('payment_cash'), async (req, res) => {
+// Delete Transaction (Adjustment, Cash, Online)
+app.delete('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
     try {
         const { distributorId } = getContext(req);
         
         const tx = await Transaction.findOne({ _id: req.params.id, distributorId });
         if(!tx) return res.status(404).json({ error: 'Transaction not found' });
         
-        if(tx.type !== 'adjustment') return res.status(400).json({ error: 'Only adjustments can be deleted' });
+        // Permission check for staff
+        if (req.user.role === 'staff') {
+             const p = req.user.permissions || [];
+             if (tx.type === 'payment_cash' && !p.includes('payment_cash')) return res.status(403).json({ error: 'Permission denied' });
+             if (tx.type === 'payment_online' && !p.includes('payment_online')) return res.status(403).json({ error: 'Permission denied' });
+        }
+
+        if(!['adjustment', 'payment_cash', 'payment_online'].includes(tx.type)) {
+             return res.status(400).json({ error: 'Only adjustments and payments can be deleted' });
+        }
         
-        // Revert balance
-        // If amount was +100 (Debit), we subtract 100.
-        // If amount was -100 (Credit), we add 100 (subtract -100).
-        await User.updateOne({ _id: tx.retailerId }, { $inc: { currentBalance: -tx.amount } });
+        let revertAmount = 0;
+        if(tx.type === 'adjustment') {
+             // Revert adjustment: -amount
+             revertAmount = -tx.amount;
+        } else {
+             // Revert payment: +amount (since payment reduced balance)
+             revertAmount = tx.amount;
+        }
+        await User.updateOne({ _id: tx.retailerId }, { $inc: { currentBalance: revertAmount } });
         
         await Transaction.deleteOne({ _id: tx._id });
         res.json({ ok: true });
@@ -1958,10 +2129,9 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
     // Allow staff to see all records, not just their own
     if (staffId) filter.createdByStaffId = staffId;
 
-    // if (retailerId) {
-    //    try { filter.retailerId = new mongoose.Types.ObjectId(String(retailerId)); } catch {}
-    // }
-    if (retailerId) filter.retailerId = retailerId;
+    if (retailerId) {
+       try { filter.retailerId = new mongoose.Types.ObjectId(String(retailerId)); } catch {}
+    }
     if (type) filter.type = type;
     if (from || to) {
       filter.createdAt = {};
@@ -2039,37 +2209,7 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
   }
 });
 
-app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
-    try {
-        const { distributorId } = getContext(req);
-        const { id } = req.params;
-        const { amount } = req.body;
-        
-        const txn = await Transaction.findOne({ _id: id, distributorId });
-        if(!txn) return res.status(404).json({ error: 'Transaction not found' });
-        
-        if(amount !== undefined) txn.amount = amount;
-        await txn.save();
-        
-        res.json({ success: true, transaction: txn });
-    } catch(e) {
-        res.status(500).json({ error: e.message });
-    }
-});
 
-app.delete('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
-    try {
-        const { distributorId } = getContext(req);
-        const { id } = req.params;
-        
-        const txn = await Transaction.findOneAndDelete({ _id: id, distributorId });
-        if(!txn) return res.status(404).json({ error: 'Transaction not found' });
-        
-        res.json({ success: true });
-    } catch(e) {
-        res.status(500).json({ error: e.message });
-    }
-});
 
 app.get('/api/my/supplier-transactions', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
@@ -2548,6 +2688,8 @@ app.post('/api/my/transactions', auth, requireDistributorOrStaff(null), async (r
     const { distributorId, staffId } = getContext(req);
     const { retailerId, type, amount, note } = req.body;
     
+    console.log('POST /api/my/transactions params:', { distributorId, retailerId, type, amount });
+
     if (!retailerId || !type || typeof amount !== 'number') {
       return res.status(400).json({ error: 'retailerId, type, amount required' });
     }
@@ -2577,6 +2719,7 @@ app.post('/api/my/transactions', auth, requireDistributorOrStaff(null), async (r
 
     res.json({ ok: true });
   } catch (err) {
+    console.error('POST /api/my/transactions error:', err);
     res.status(500).json({ error: 'Failed to create transaction' });
   }
 });

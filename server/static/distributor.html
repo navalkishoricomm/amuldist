@@ -31,6 +31,99 @@
       #tab-stock-in .table td, #tab-stock-in .table th,
       #tab-stock-out .table td, #tab-stock-out .table th { padding: 0.25rem; }
     }
+
+    /* Product Page UI Redesign */
+    .prod-group-card {
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      margin-bottom: 1.5rem;
+      background: #fff;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .prod-group-card:hover {
+      box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+    }
+    .prod-group-header {
+      background: linear-gradient(to right, #f8f9fa, #fff);
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #edf2f7;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-radius: 12px 12px 0 0;
+    }
+    .prod-group-title {
+      font-weight: 700;
+      color: #2d3748;
+      font-size: 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .variant-row {
+      display: flex;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #f1f5f9;
+      background-color: #fff;
+    }
+    .variant-row:last-child {
+      border-bottom: none;
+      border-radius: 0 0 12px 12px;
+    }
+    .variant-row:hover {
+      background-color: #fafbfc;
+    }
+    .variant-info {
+      flex: 1;
+      min-width: 0; /* text overflow fix */
+    }
+    .variant-name {
+      font-weight: 600;
+      color: #4a5568;
+      font-size: 1rem;
+      margin-bottom: 0.1rem;
+    }
+    .variant-sub {
+      color: #718096;
+      font-size: 0.85rem;
+    }
+    .variant-controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .price-input-group {
+      width: 120px;
+    }
+    .unit-select-group {
+      width: 160px;
+    }
+    .action-btn-group {
+      display: flex;
+      gap: 0.25rem;
+    }
+    @media (max-width: 768px) {
+      .variant-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+        padding: 1rem;
+      }
+      .variant-controls {
+        flex-direction: column;
+        width: 100%;
+        gap: 0.75rem;
+      }
+      .price-input-group, .unit-select-group {
+        width: 100%;
+      }
+      .action-btn-group {
+        width: 100%;
+        justify-content: flex-end;
+      }
+    }
   </style>
 </head>
 <body style="padding-top: 0; background-color: #f8f9fa;">
@@ -38,7 +131,7 @@
   <div class="container-fluid px-0">
     <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm mb-3 sticky-top">
       <div class="container-fluid">
-        <a id="navbarBrand" class="navbar-brand fw-bold" href="#">Distributor Dashboard</a>
+        <a id="navbarBrand" class="navbar-brand fw-bold" href="#">Distributor Dashboard <span class="badge bg-secondary ms-2" style="font-size: 0.7rem;">v46</span></a>
         <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#offcanvasNavbar">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -221,21 +314,31 @@
                   <button class="btn btn-outline-secondary btn-sm" onclick="renderDistProductsGrid('#distProdGrid')"><i class="bi bi-arrow-repeat"></i></button>
                 </div>
               </div>
-              <div class="d-flex gap-2 mb-2">
-                 <input id="distProdName" class="form-control form-control-sm flex-grow-1" placeholder="Product name" />
-                 <div class="input-group input-group-sm" style="width:70px; flex-shrink:0;">
-                   <select id="distUnit" class="form-select" style="font-size:0.7rem; padding:0.1rem 0.1rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;"></select>
-                   <button id="distUnitInfo" class="btn btn-outline-secondary" type="button" title="Unit Details" style="padding:0.1rem 0.1rem;"><i class="bi bi-info-circle"></i></button>
-                 </div>
-                 <button id="distProdAdd" class="btn btn-sm btn-primary"><i class="bi bi-plus"></i> Add</button>
+              <div class="row g-2 mb-2">
+                <div class="col-12 col-md-5">
+                   <input id="distProdBaseName" class="form-control form-control-sm" placeholder="Base Name (e.g. Amul Milk)" />
+                </div>
+                <div class="col-6 col-md-3">
+                   <input id="distProdVariantName" class="form-control form-control-sm" placeholder="Variant (e.g. 500ml)" />
+                </div>
+                <div class="col-6 col-md-4">
+                  <div class="d-flex gap-2">
+                     <div class="input-group input-group-sm flex-grow-1">
+                       <select id="distUnit" class="form-select" style="font-size:0.7rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;"></select>
+                       <button id="distUnitInfo" class="btn btn-outline-secondary" type="button" title="Unit Details"><i class="bi bi-info-circle"></i></button>
+                     </div>
+                     <button id="distProdAdd" class="btn btn-sm btn-primary" style="white-space:nowrap"><i class="bi bi-plus"></i> Add</button>
+                  </div>
+                </div>
+                <input type="hidden" id="distProdName" />
               </div>
-              <div id="distProdGrid" class="grid scroll-section" style="max-height:60vh"></div>
+              <div id="distProdGrid" class="scroll-section" style="max-height:60vh"></div>
               <div class="mt-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <div class="fw-bold">Hidden (Global)</div>
                   <button class="btn btn-outline-secondary btn-sm" onclick="renderHiddenProducts('#hiddenProdList')"><i class="bi bi-eye"></i> Show</button>
                 </div>
-                <div id="hiddenProdList" class="grid scroll-section" style="max-height:40vh"></div>
+                <div id="hiddenProdList" class="scroll-section" style="max-height:40vh"></div>
               </div>
             </div>
           </div>
@@ -801,9 +904,48 @@
     </div>
   </div>
 
+  <!-- Product Edit Modal -->
+  <div class="modal fade" id="productEditModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Product Variant</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editProdId" />
+          <input type="hidden" id="editProdSource" />
+          <div class="mb-2">
+            <label class="form-label small text-muted">Original Name (English)</label>
+            <input type="text" id="editProdNameDisplay" class="form-control form-control-sm" readonly />
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Base Name</label>
+              <input type="text" id="editProdBaseName" class="form-control" placeholder="e.g. Amul Gold" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Variant Name</label>
+              <input type="text" id="editProdVariantName" class="form-control" placeholder="e.g. 500ml" />
+            </div>
+          </div>
+          <div class="form-text small mb-2">Defining Base & Variant creates a group.</div>
+          <div class="mb-2">
+             <label class="form-label">Hindi Name</label>
+             <input type="text" id="editProdNameHindi" class="form-control" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="btnSaveProductEdit">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <div id="notifyArea" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
-  <script src="/ui/app.js?v=44"></script>
+  <script src="/ui/app.js?v=1.0.11"></script>
   <script src="/ui/staff_logic.js?v=2"></script>
   <script>
     // Failsafe: if app.js didn't init properly, try manually

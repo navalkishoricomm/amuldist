@@ -162,8 +162,107 @@
     </div>
   </div>
 
+  <!-- Product Edit Modal -->
+  <div class="modal fade" id="productEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Product</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editProdId" />
+          <div class="row g-2">
+            <div class="col-md-6">
+                <label class="form-label">Base Name</label>
+                <input type="text" id="editProdBaseName" class="form-control" placeholder="e.g. Amul Milk" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Variant Name</label>
+                <input type="text" id="editProdVariantName" class="form-control" placeholder="e.g. 500ml" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">Full Name (English)</label>
+                <input type="text" id="editProdNameEng" class="form-control" placeholder="e.g. Amul Milk 500ml" />
+            </div>
+            <div class="col-12">
+                <label class="form-label">Name (Hindi)</label>
+                <input type="text" id="editProdNameHin" class="form-control" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Unit</label>
+                <select id="editProdUnit" class="form-select"></select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Global Price</label>
+                <input type="number" id="editProdPrice" class="form-control" />
+            </div>
+            <div class="col-12">
+                <div class="form-check form-switch mt-2">
+                    <input class="form-check-input" type="checkbox" id="editProdActive">
+                    <label class="form-check-label" for="editProdActive">Active</label>
+                </div>
+            </div>
+            <div class="col-12 mt-3 p-2 bg-light border rounded">
+                <h6>Variant Group</h6>
+                <div class="input-group">
+                    <input type="text" id="editProdVariantGroup" class="form-control" placeholder="Group ID (optional)" readonly>
+                    <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('editProdVariantGroup').value = crypto.randomUUID()">Generate New</button>
+                    <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('editProdVariantGroup').value = ''">Clear</button>
+                </div>
+                <small class="text-muted">Products with the same Group ID will be grouped together.</small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="btnSaveProduct">Save Product</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product Edit Modal -->
+  <div class="modal fade" id="productEditModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Product Variant</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editProdId" />
+          <input type="hidden" id="editProdSource" />
+          <div class="mb-2">
+            <label class="form-label small text-muted">Original Name (English)</label>
+            <input type="text" id="editProdNameDisplay" class="form-control form-control-sm" readonly />
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Base Name</label>
+              <input type="text" id="editProdBaseName" class="form-control" placeholder="e.g. Amul Gold" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Variant Name</label>
+              <input type="text" id="editProdVariantName" class="form-control" placeholder="e.g. 500ml" />
+            </div>
+          </div>
+          <div class="form-text small mb-2">Defining Base & Variant creates a group.</div>
+          <div class="mb-2">
+             <label class="form-label">Hindi Name</label>
+             <input type="text" id="editProdNameHindi" class="form-control" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="btnSaveProductEdit">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-   <script src="/ui/app.js?v=44"></script>
+  <script src="/ui/app.js?v=1.0.11"></script>
 </body>
 </html>

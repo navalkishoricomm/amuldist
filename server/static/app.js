@@ -13,6 +13,11 @@ function setToken(t, r){
 }
 function uiHref(page){ const isFile = location.protocol === 'file:'; return isFile ? `${page}.html` : `/ui/${page}.html`; }
 async function api(path, opts={}){
+  // Version check
+  if(!window.APP_VERSION_LOGGED) {
+      console.log('App Version: v1.0.9 - Loaded');
+      window.APP_VERSION_LOGGED = true;
+  }
   const headers = Object.assign({ 'Content-Type':'application/json' }, opts.headers||{});
   if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
   let res;
@@ -199,6 +204,35 @@ function formatUnitQty(qty, unitObj, unitMap){
   }
 }
 
+function groupProducts(products) {
+  const groupsMap = new Map();
+  products.forEach(p => {
+    const key = p.baseName || p.nameEnglish;
+    if (!groupsMap.has(key)) {
+      groupsMap.set(key, { name: key, items: [], hasVariants: false });
+    }
+    groupsMap.get(key).items.push(p);
+  });
+  
+  const groups = Array.from(groupsMap.values());
+  
+  groups.forEach(g => {
+     if(g.items.length > 1 || (g.items.length === 1 && (g.items[0].baseName || g.items[0].variantName))) {
+        g.hasVariants = true;
+        g.items.sort((a, b) => {
+            const vA = a.variantName || '';
+            const vB = b.variantName || '';
+            if(!vA && vB) return -1;
+            if(vA && !vB) return 1;
+            return vA.localeCompare(vB);
+        });
+     }
+  });
+  return groups;
+}
+// Explicitly export to global scope to prevent scope issues
+window.groupProducts = groupProducts;
+
 async function logout(){ try{ if(TOKEN){ await api('/api/auth/logout',{ method:'POST' }); } }catch{} setToken('', ''); location.href = uiHref('index'); }
 function bindLogout(){ const btn=qs('#logoutBtn'); if(btn){ btn.addEventListener('click', (e)=>{ e.preventDefault(); logout(); }); } }
 
@@ -280,6 +314,7 @@ async function checkRoleAndRedirect(expected){ try{ const me=await api('/api/me'
 async function loadAdmin(){
   await checkRoleAndRedirect('admin');
   bindLogout();
+  bindProductEditModal();
   renderUnitsGrid('#unitsGrid');
   bindUnitForm();
   renderProductsGrid('#productsGrid');
@@ -333,10 +368,19 @@ async function renderProductsGrid(selector){
              <button class="btn btn-outline-primary" onclick="updateProductUnit('${p._id}')"><i class="bi bi-check"></i></button>
           </div>
         </div>
-        <div>
+        <div class="d-flex align-items-center gap-1 action-div">
           <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${p._id}')"><i class="bi bi-trash"></i></button>
         </div>
       </div>`; 
+    
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn-sm btn-outline-secondary';
+    editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+    editBtn.onclick = () => openProductEditModal(p, 'global');
+    
+    const actionDiv = card.querySelector('.action-div');
+    if(actionDiv) actionDiv.insertBefore(editBtn, actionDiv.firstChild);
+
     el.appendChild(card);
     const sel = card.querySelector(`#p-unit-${p._id}`);
     if(sel && p.unit) sel.value = typeof p.unit === 'object' ? p.unit._id : p.unit;
@@ -354,6 +398,58 @@ async function updateProductUnit(id){
 
 function bindProductForm(){ const btn=qs('#prodSave'); if(btn){ btn.onclick=async ()=>{ const nameEnglish=qs('#prodName').value; try{ await api('/api/products',{ method:'POST', body: JSON.stringify({ nameEnglish }) }); qs('#prodName').value=''; renderProductsGrid('#productsGrid'); }catch(e){ alert(e.message); } }; } }
 async function deleteProduct(id){ if(!confirm('Delete product?')) return; try{ await api(`/api/products/${id}`,{ method:'DELETE' }); renderProductsGrid('#productsGrid'); }catch(e){ alert(e.message); } }
+
+function bindProductEditModal() {
+  const btn = qs('#btnSaveProductEdit');
+  if(!btn) return;
+  btn.onclick = async () => {
+    const id = qs('#editProdId').value;
+    const source = qs('#editProdSource').value;
+    const baseName = qs('#editProdBaseName').value;
+    const variantName = qs('#editProdVariantName').value;
+    const nameHindi = qs('#editProdNameHindi').value;
+    const variantGroup = qs('#editProdVariantGroup') ? qs('#editProdVariantGroup').value : '';
+
+    const payload = {
+        nameHindi,
+        baseName,
+        variantName,
+        variantGroup
+    };
+    
+    try {
+        const endpoint = source === 'custom' ? `/api/my/products/${id}` : `/api/products/${id}`;
+        await api(endpoint, { method: 'PATCH', body: JSON.stringify(payload) });
+        
+        // Hide modal
+        const modalEl = qs('#productEditModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if(modal) modal.hide();
+        
+        // Refresh grid
+        renderProductsGrid('#productsGrid');
+        alert('Product updated');
+    } catch(e) {
+        alert(e.message);
+    }
+  };
+}
+
+window.openProductEditModal = function(p, source) {
+    const modalEl = qs('#productEditModal');
+    if(!modalEl) return;
+    const modal = new bootstrap.Modal(modalEl);
+    
+    qs('#editProdId').value = p._id;
+    qs('#editProdSource').value = source;
+    qs('#editProdNameDisplay').value = p.nameEnglish;
+    qs('#editProdBaseName').value = p.baseName || '';
+    qs('#editProdVariantName').value = p.variantName || '';
+    qs('#editProdNameHindi').value = p.nameHindi || '';
+    if(qs('#editProdVariantGroup')) qs('#editProdVariantGroup').value = p.variantGroup || '';
+    
+    modal.show();
+};
 
 async function renderUsersList(selector){ 
   const el=qs(selector); 
@@ -468,7 +564,7 @@ window.switchTab = (id, pushHistory = true) => {
   if(id==='tab-stock-in') renderStockIn();
   if(id==='tab-stock-out') renderStockOut();
   if(id==='tab-stock-wastage') renderStockWastage();
-  if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); bindRetailerEdit(); bindAdjustmentForm(); }
+  if(id==='tab-retailers') { loadRetailers(); bindRetailerAdd(); bindRetailerEdit(); bindAdjustmentForm(); bindPaymentActions(); }
   if(id==='tab-staff') { loadStaff(); bindStaffForm(); }
   if(id==='tab-rates') { loadDistRates(); }
   if(id==='tab-reports') { renderReport(); bindReportActions(); }
@@ -548,6 +644,7 @@ async function loadDistributor(){
 
   const me = await checkRoleAndRedirect('distributor');
   bindLogout();
+  bindProductEditModal();
   
   // Show staff name if available
   if(me.name) {
@@ -631,11 +728,25 @@ async function bindDistProductAdd(){
         const unitEl=qs('#distUnit');
         const name=(nameEl&&nameEl.value||'').trim();
         const unit=(unitEl&&unitEl.value||'').trim();
-        if(!name){ notify('Name required', 'warning'); return; }
+        
+        const baseNameEl = qs('#distProdBaseName');
+        const variantNameEl = qs('#distProdVariantName');
+        const baseName = baseNameEl ? baseNameEl.value.trim() : '';
+        const variantName = variantNameEl ? variantNameEl.value.trim() : '';
+
+        if(!name && !baseName){ notify('Product Name or Base Name required', 'warning'); return; }
+        
+        const payload = { unit };
+        if(name) payload.nameEnglish = name;
+        if(baseName) payload.baseName = baseName;
+        if(variantName) payload.variantName = variantName;
+
         try{
-          await api('/api/my/products',{ method:'POST', body: JSON.stringify({ nameEnglish:name, unit }) });
+          await api('/api/my/products',{ method:'POST', body: JSON.stringify(payload) });
           if(nameEl) nameEl.value='';
           if(unitEl) unitEl.value='';
+          if(baseNameEl) baseNameEl.value='';
+          if(variantNameEl) variantNameEl.value='';
           renderDistProductsGrid('#distProdGrid');
         }catch(e){ notify(e.message, 'danger'); }
       };
@@ -656,9 +767,18 @@ async function renderDistProductsGrid(selector){
   el.innerHTML='';
   if(items.length===0){ el.innerHTML='<div class="text-muted p-2">No products found. Add one or check hidden.</div>'; return; }
   
-  items.forEach(p=>{
-    const div=document.createElement('div');
-    div.className='d-flex justify-content-between align-items-center border-bottom p-2';
+  // Group items by baseName
+  const groups = {};
+  items.forEach(p => {
+    const key = p.baseName ? p.baseName : p.nameEnglish;
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+
+  // Helper to render a single row within div layout
+  const renderRow = (p, isVariant=false) => {
+    const div = document.createElement('div');
+    div.className = 'variant-row'; // Custom CSS class
     
     const unitOptions = '<option value="">-</option>' + units.map(u=>{
       let label = u.symbol;
@@ -672,21 +792,63 @@ async function renderDistProductsGrid(selector){
       return `<option value="${u._id}" ${p.unit===u._id?'selected':''}>${label}</option>`;
     }).join('');
     
+    const displayName = isVariant && p.variantName ? p.variantName : p.nameEnglish;
+    const nameDisplay = `<div class="variant-name">${displayName}</div>${p.nameHindi ? `<div class="variant-sub">${p.nameHindi}</div>` : ''}`;
+    const badge = p.source === 'global' ? '<span class="badge bg-secondary rounded-pill" style="font-size:0.6rem">Global</span>' : '<span class="badge bg-info text-dark rounded-pill" style="font-size:0.6rem">Custom</span>';
+
     div.innerHTML=`
-      <div>
-        <div class="fw-bold">${p.nameEnglish} <span class="badge bg-secondary rounded-pill small">${p.source}</span></div>
-        <div class="text-muted small">${p.nameHindi||''}</div>
+      <div class="variant-info">
+        ${nameDisplay}
+        <div class="mt-1">${badge}</div>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <div class="input-group input-group-sm" style="width:260px">
-          <select class="form-select" data-id="${p._id}">${unitOptions}</select>
-          <button class="btn btn-outline-secondary" type="button" data-act="unitInfo" data-id="${p._id}" title="View Unit Details"><i class="bi bi-info-circle"></i></button>
+      
+      <div class="variant-controls">
+        <div class="price-input-group">
+          <input type="number" class="form-control form-control-sm" placeholder="Price" value="${p.price||''}" data-id="${p._id}" data-type="price">
         </div>
-        <button class="btn btn-sm btn-outline-primary" data-act="saveUnit" data-id="${p._id}" data-source="${p.source}" title="Save Unit"><i class="bi bi-check"></i></button>
-        ${p.source==='custom' ? `<button class="btn btn-sm btn-outline-danger" data-act="del" data-id="${p._id}"><i class="bi bi-trash"></i></button>` : `<button class="btn btn-sm btn-outline-secondary" data-act="hide" data-id="${p._id}"><i class="bi bi-eye-slash"></i></button>`}
+        
+        <div class="unit-select-group">
+           <div class="input-group input-group-sm">
+             <select class="form-select" data-id="${p._id}" data-type="unit">${unitOptions}</select>
+             <button class="btn btn-outline-secondary" type="button" data-act="unitInfo" data-id="${p._id}" title="Info"><i class="bi bi-info-circle"></i></button>
+           </div>
+        </div>
+
+        <div class="action-btn-group">
+          <button class="btn btn-sm btn-outline-primary" data-act="save" data-id="${p._id}" data-source="${p.source}" title="Save Changes"><i class="bi bi-check-lg"></i></button>
+          ${p.source==='custom' ? `<button class="btn btn-sm btn-outline-danger" data-act="del" data-id="${p._id}" title="Delete"><i class="bi bi-trash"></i></button>` : `<button class="btn btn-sm btn-outline-secondary" data-act="hide" data-id="${p._id}" title="Hide"><i class="bi bi-eye-slash"></i></button>`}
+        </div>
       </div>
     `;
-    el.appendChild(div);
+    return div;
+  };
+
+  Object.keys(groups).sort().forEach(key => {
+    const groupItems = groups[key];
+    groupItems.sort((a,b) => (a.variantName||'').localeCompare(b.variantName||''));
+
+    const card = document.createElement('div');
+    card.className = 'prod-group-card'; // Custom CSS class
+    
+    // Header
+    const header = document.createElement('div');
+    header.className = 'prod-group-header'; // Custom CSS class
+    header.innerHTML = `
+       <div class="fw-bold text-dark m-0 fs-5"><i class="bi bi-collection-fill me-2 text-primary"></i>${key}</div>
+       <button class="btn btn-sm btn-primary rounded-pill px-3 shadow-sm" data-act="addVariant" data-base="${key}"><i class="bi bi-plus-lg"></i> Add Variant</button>
+    `;
+    card.appendChild(header);
+
+    // Body container
+    const body = document.createElement('div');
+    body.className = 'prod-group-body';
+    
+    groupItems.forEach(p => {
+        body.appendChild(renderRow(p, !!p.variantName));
+    });
+    
+    card.appendChild(body);
+    el.appendChild(card);
   });
   
   el.onclick = async (ev)=>{
@@ -694,7 +856,14 @@ async function renderDistProductsGrid(selector){
     const btn = t.closest('button');
     if(!btn) return;
     const act = btn.getAttribute('data-act');
-    const id = btn.getAttribute('data-id');
+    const id = btn.getAttribute('data-id'); 
+
+    if(act === 'addVariant') {
+       const base = btn.getAttribute('data-base');
+       fillAddVariant(base);
+       return;
+    }
+
     if(!act||!id) return;
     
     try{
@@ -705,13 +874,25 @@ async function renderDistProductsGrid(selector){
         const unit = unitMap[unitId];
         if(unit) renderUnitDetailModal(unit, unitMap);
       }
-      if(act==='saveUnit'){
-        const sel = el.querySelector(`select[data-id="${id}"]`);
-        const unit = sel ? sel.value : '';
+      if(act==='save'){
+        // Save both Price and Unit
+        const row = btn.closest('.variant-row');
+        const priceInput = row.querySelector(`input[data-type="price"]`);
+        const unitSelect = row.querySelector(`select[data-type="unit"]`);
+        
+        const price = priceInput ? parseFloat(priceInput.value) : 0;
+        const unit = unitSelect ? unitSelect.value : '';
         const source = btn.getAttribute('data-source');
-        const endpoint = source==='custom' ? `/api/my/products/${id}` : `/api/products/${id}`;
-        await api(endpoint, { method:'PATCH', body: JSON.stringify({ unit }) });
-        alert('Unit updated');
+        
+        await api(`/api/my/products/${id}`, { 
+            method:'PATCH', 
+            body: JSON.stringify({ unit, price }) 
+        });
+        
+        // Visual feedback
+        const icon = btn.querySelector('i');
+        if(icon) { icon.className='bi bi-check2-all'; setTimeout(()=>icon.className='bi bi-check-lg', 1500); }
+        notify('Product updated', 'success');
       }
       if(act==='del'){
         if(!confirm('Delete custom product?')) return;
@@ -762,9 +943,27 @@ async function renderHiddenProducts(selector){
   };
 }
 
+function fillAddVariant(baseName) {
+  const baseInput = qs('#distProdBaseName');
+  const varInput = qs('#distProdVariantName');
+  const simpleInput = qs('#distProdName');
+  
+  if(baseInput) {
+     baseInput.value = baseName;
+     // Scroll to it
+     setTimeout(() => baseInput.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+  }
+  if(simpleInput) simpleInput.value = ''; // Clear simple name
+  if(varInput) {
+     varInput.value = '';
+     setTimeout(() => varInput.focus(), 600);
+  }
+}
+
 async function renderInventoryStatus(){
   try {
-    const products = await api('/api/products');
+    const products = await api('/api/my/products?_t=' + Date.now());
+    console.log('Raw Products from API:', products); // DEBUG LOG
 
     // Fetch product stats for sorting
     try {
@@ -787,25 +986,53 @@ async function renderInventoryStatus(){
     const tbody = qs('#invStatusRows');
     if (tbody) {
       tbody.innerHTML = '';
-      products.forEach(p => {
-        const qty = invMap[p._id] || 0;
-        let badgeClass = 'bg-secondary';
-        if(qty > 10) badgeClass = 'bg-success';
-        else if(qty > 0) badgeClass = 'bg-warning text-dark';
-        
-        const qtyStr = formatUnitQty(qty, p.unit, unitMap);
-        
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>
-            <div class="fw-bold">${p.nameEnglish}</div>
-            <div class="text-muted small">${p.nameHindi}</div>
-          </td>
-          <td class="text-end">
-            <span class="badge ${badgeClass} fs-6">${qtyStr}</span>
-          </td>
-        `;
-        tbody.appendChild(tr);
+      const grouped = groupProducts(products);
+      console.log('Grouped Products:', grouped); // DEBUG LOG
+      grouped.forEach(g => {
+        if(g.hasVariants) {
+             const trHeader = document.createElement('tr');
+             trHeader.className = 'table-light fw-bold';
+             trHeader.innerHTML = `<td colspan="2">${g.name}</td>`;
+             tbody.appendChild(trHeader);
+             
+             g.items.forEach(p => {
+                const qty = invMap[p._id] || 0;
+                let badgeClass = 'bg-secondary';
+                if(qty > 10) badgeClass = 'bg-success';
+                else if(qty > 0) badgeClass = 'bg-warning text-dark';
+                const qtyStr = formatUnitQty(qty, p.unit, unitMap);
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                  <td class="ps-4">
+                    <div class="">${p.variantName || 'Base'}</div>
+                  </td>
+                  <td class="text-end">
+                    <span class="badge ${badgeClass} fs-6">${qtyStr}</span>
+                  </td>
+                `;
+                tbody.appendChild(tr);
+             });
+        } else {
+             const p = g.items[0];
+             const qty = invMap[p._id] || 0;
+             let badgeClass = 'bg-secondary';
+             if(qty > 10) badgeClass = 'bg-success';
+             else if(qty > 0) badgeClass = 'bg-warning text-dark';
+             const qtyStr = formatUnitQty(qty, p.unit, unitMap);
+             
+             const tr = document.createElement('tr');
+             tr.innerHTML = `
+               <td>
+                 <div class="fw-bold">${p.nameEnglish}</div>
+                 <div class="text-muted small">${p.nameHindi}</div>
+               </td>
+               <td class="text-end">
+                 <span class="badge ${badgeClass} fs-6">${qtyStr}</span>
+               </td>
+             `;
+             tbody.appendChild(tr);
+        }
       });
     }
   } catch (e) { console.error(e); }
@@ -852,7 +1079,7 @@ function autoConvertSecondUnit(e) {
 async function renderStockIn(editMove = null){
   try {
     const suppliers = await api('/api/my/suppliers');
-    const products = await api('/api/my/products');
+    const products = await api('/api/my/products?_t=' + Date.now());
     
     // Fetch product stats for sorting
     try {
@@ -993,8 +1220,10 @@ async function renderStockIn(editMove = null){
 
     if(tbody){
       tbody.innerHTML = '';
-      products.forEach(p => {
-        if(p.source === 'global' && !p.active) return;
+      const grouped = groupProducts(products);
+      
+      const createRow = (p, isGrouped) => {
+        if(p.source === 'global' && !p.active) return null;
         const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
         const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
@@ -1018,15 +1247,19 @@ async function renderStockIn(editMove = null){
           : `<input type="number" class="form-control form-control-sm qty-narrow supout-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         const tr = document.createElement('tr');
         tr.id = `row-in-${p._id}`;
+        
+        const nameDisplay = isGrouped ? (p.variantName || 'Base') : p.nameEnglish;
+        const nameClass = isGrouped ? '' : 'fw-bold small';
+        const tdClass = isGrouped ? 'ps-4' : '';
+
         tr.innerHTML = `
-          <td>
-            <div class="fw-bold small">${p.nameEnglish}</div>
+          <td class="${tdClass}">
+            <div class="${nameClass}">${nameDisplay}</div>
           </td>
           <td class="text-center col-stock d-none d-md-table-cell"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${formatUnitQty(curQty, p.unit, unitMap)}</span></td>
           <td>${qtyInCell}</td>
           <td>${qtyOutSupCell}</td>
         `;
-        tbody.appendChild(tr);
 
         const ex = existingMap[p._id];
         if(ex){
@@ -1062,6 +1295,24 @@ async function renderStockIn(editMove = null){
             if(s) s.value = Number(exOut.quantity||0);
           }
         }
+        return tr;
+      };
+
+      grouped.forEach(g => {
+         if(g.hasVariants) {
+             const trHeader = document.createElement('tr');
+             trHeader.className = 'table-light fw-bold';
+             trHeader.innerHTML = `<td colspan="4">${g.name}</td>`;
+             tbody.appendChild(trHeader);
+             
+             g.items.forEach(p => {
+                 const tr = createRow(p, true);
+                 if(tr) tbody.appendChild(tr);
+             });
+         } else {
+             const tr = createRow(g.items[0], false);
+             if(tr) tbody.appendChild(tr);
+         }
       });
       
       // Auto-convert listeners
@@ -1264,7 +1515,7 @@ async function renderStockIn(editMove = null){
 
 async function renderStockWastage(){
   try {
-    const products = await api('/api/my/products');
+    const products = await api('/api/my/products?_t=' + Date.now());
     // Fetch product stats for sorting
     try {
         const stats = await api('/api/my/product-stats');
@@ -1287,8 +1538,10 @@ async function renderStockWastage(){
     if(dateInput && !dateInput.value){ dateInput.value = new Date().toISOString().split('T')[0]; }
     if(tbody){
       tbody.innerHTML = '';
-      products.forEach(p => {
-        if(p.source === 'global' && !p.active) return;
+      const grouped = groupProducts(products);
+      
+      const createRow = (p, isGrouped) => {
+        if(p.source === 'global' && !p.active) return null;
         const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
         const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
@@ -1302,14 +1555,36 @@ async function renderStockWastage(){
              </div>`
           : `<input type="number" class="form-control form-control-sm qty-narrow wast-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         const tr = document.createElement('tr');
+        
+        const nameDisplay = isGrouped ? (p.variantName || 'Base') : p.nameEnglish;
+        const nameClass = isGrouped ? '' : 'fw-bold small';
+        const tdClass = isGrouped ? 'ps-4' : '';
+
         tr.innerHTML = `
-          <td>
-            <div class="fw-bold small">${p.nameEnglish}</div>
+          <td class="${tdClass}">
+            <div class="${nameClass}">${nameDisplay}</div>
             <div class="text-muted small">Cur: <span class="badge ${ (invMap[p._id]||0) > 0 ? 'bg-success':'bg-secondary'}">${formatUnitQty(invMap[p._id]||0, p.unit, unitMap)}</span></div>
           </td>
           <td>${qtyCell}</td>
         `;
-        tbody.appendChild(tr);
+        return tr;
+      };
+
+      grouped.forEach(g => {
+         if(g.hasVariants) {
+             const trHeader = document.createElement('tr');
+             trHeader.className = 'table-light fw-bold';
+             trHeader.innerHTML = `<td colspan="2">${g.name}</td>`;
+             tbody.appendChild(trHeader);
+             
+             g.items.forEach(p => {
+                 const tr = createRow(p, true);
+                 if(tr) tbody.appendChild(tr);
+             });
+         } else {
+             const tr = createRow(g.items[0], false);
+             if(tr) tbody.appendChild(tr);
+         }
       });
       qsa('.wast-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
     }
@@ -1354,7 +1629,7 @@ async function renderStockWastage(){
 async function renderStockOut(initialState = null){
   try {
     const retailers = await api('/api/my/retailers');
-    const products = await api('/api/my/products');
+    const products = await api('/api/my/products?_t=' + Date.now());
 
     // Fetch product stats for sorting
     try {
@@ -1522,8 +1797,10 @@ async function renderStockOut(initialState = null){
     const renderRows = () => {
       if(!tbody) return;
       tbody.innerHTML = '';
-      products.forEach(p => {
-        if(p.source === 'global' && !p.active) return;
+      const grouped = groupProducts(products);
+      
+      const createRow = (p, isGrouped) => {
+        if(p.source === 'global' && !p.active) return null;
         const stock = invMap[p._id] || 0;
         const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
         const isCompound = u && String(u.type) === 'Compound';
@@ -1545,9 +1822,13 @@ async function renderStockOut(initialState = null){
              <div class="small text-muted sm-hide">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
           : `<input type="number" class="form-control form-control-sm qty-narrow out-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
 
+        const nameDisplay = isGrouped ? (p.variantName || 'Base') : p.nameEnglish;
+        const nameClass = isGrouped ? '' : 'fw-bold';
+        const tdClass = isGrouped ? 'ps-4' : '';
+
         tr.innerHTML = `
-          <td>
-            <div class="fw-bold">${p.nameEnglish}</div>
+          <td class="${tdClass}">
+            <div class="${nameClass}">${nameDisplay}</div>
             <div class="small text-muted sm-hide">₹${price.toFixed(2)} / ${priceUnitSymbol}</div>
           </td>
           <td>${qtyCell}</td>
@@ -1556,7 +1837,24 @@ async function renderStockOut(initialState = null){
             <div id="brk-${p._id}" class="small text-muted sm-hide"></div>
           </td>
         `;
-        tbody.appendChild(tr);
+        return tr;
+      };
+
+      grouped.forEach(g => {
+         if(g.hasVariants) {
+             const trHeader = document.createElement('tr');
+             trHeader.className = 'table-light fw-bold';
+             trHeader.innerHTML = `<td colspan="3">${g.name}</td>`;
+             tbody.appendChild(trHeader);
+             
+             g.items.forEach(p => {
+                 const tr = createRow(p, true);
+                 if(tr) tbody.appendChild(tr);
+             });
+         } else {
+             const tr = createRow(g.items[0], false);
+             if(tr) tbody.appendChild(tr);
+         }
       });
       
       qsa('.out-first').forEach(i => {
@@ -2271,17 +2569,37 @@ function bindRetailerAdd() {
   }
 }
 
+function bindPaymentActions(){
+  const btn = qs('#paySave');
+  if(btn){
+     btn.onclick = submitPayment;
+  }
+}
+
 async function preparePayment(id, name, currentBalance){
   qs('#payRetailerName').textContent = name;
   qs('#payRetailerId').value = id;
-  qs('#payAmount').value = '';
+  const amtInp = qs('#payAmount');
+  if(amtInp) amtInp.value = '';
   qs('#payNote').value = '';
+  
   const balEl = qs('#payCurrentBalance');
   if(balEl) {
      const bal = Number(currentBalance)||0;
+     balEl.dataset.originalBalance = bal;
      balEl.textContent = '₹ ' + bal.toFixed(2);
      balEl.className = 'fw-bold ' + (bal>0 ? 'text-danger' : 'text-success');
+     
+     if(amtInp){
+         amtInp.oninput = () => {
+             const orig = Number(balEl.dataset.originalBalance)||0;
+             const pay = Number(amtInp.value)||0;
+             const newBal = orig - pay;
+             balEl.innerHTML = `<span class="text-decoration-line-through text-muted">₹${orig.toFixed(2)}</span> <i class="bi bi-arrow-right"></i> <span class="${newBal>0?'text-danger':'text-success'}">₹${newBal.toFixed(2)}</span>`;
+         };
+     }
   }
+  
   const typeSel = qs('#payType');
   const saveBtn = qs('#paySave');
   if(typeSel){
@@ -2354,7 +2672,10 @@ async function bindReportActions(){
     if(fromInp) fromInp.value = today;
     if(toInp) toInp.value = today;
 
-    const products = await api('/api/products');
+    let products = [];
+    if(ROLE === 'admin') products = await api('/api/products');
+    else products = await api('/api/my/products?_t=' + Date.now());
+
     if(prodSel){ prodSel.innerHTML = '<option value="">All Products</option>' + products.map(p=>`<option value="${p._id}">${p.nameEnglish}</option>`).join(''); }
 
     if(ROLE === 'admin'){
@@ -2465,6 +2786,7 @@ async function renderReport(){
 
     let url = '';
     const params = [];
+    params.push(`_t=${Date.now()}`);
     if(staffId) params.push(`staffId=${encodeURIComponent(staffId)}`);
     if(from) params.push(`from=${encodeURIComponent(from)}`);
     if(to) params.push(`to=${encodeURIComponent(to)}`);
@@ -2495,7 +2817,10 @@ async function renderReport(){
     const thead = qs('#repThead');
     const tbody = qs('#repRows');
     const cnt = qs('#repCount');
-    const products = await api('/api/products');
+    let products = [];
+    if(ROLE === 'admin') products = await api('/api/products');
+    else products = await api('/api/my/products?_t=' + Date.now());
+
     const pMap = {}; products.forEach(p=>pMap[p._id]=p.nameEnglish);
     const rMap = {};
     const rBalMap = {};
@@ -2678,17 +3003,47 @@ async function renderReport(){
 
       if(tbody){ tbody.innerHTML=''; 
       
-      // Sort by Quantity Movement (IN + OUT) Descending
-      const sortedItems = Object.values(agg).sort((a, b) => {
-          const moveA = (a.in || 0) + (a.out || 0);
-          const moveB = (b.in || 0) + (b.out || 0);
-          return moveB - moveA;
+      // Prepare items for grouping
+      const reportItems = [];
+      const orphanItems = [];
+      
+      Object.values(agg).forEach(item => {
+            if(item.obj) {
+                const p = { ...item.obj };
+                p._stats = item;
+                reportItems.push(p);
+            } else {
+                orphanItems.push(item);
+            }
+        });
+
+        if(reportItems.length > 0) {
+            console.log('DEBUG: First report item:', reportItems[0]);
+            console.log('DEBUG: Item baseName:', reportItems[0].baseName);
+        }
+
+        const groups = groupProducts(reportItems);
+
+      // Calculate group totals for sorting
+      groups.forEach(g => {
+          g.totalMove = g.items.reduce((sum, p) => {
+              const s = p._stats;
+              return sum + (s.in||0) + (s.out||0);
+          }, 0);
       });
 
-      sortedItems.forEach(item => {
-          const pObj = item.obj;
-          const pId = item.id;
-          const prodName = pObj ? (pObj.nameEnglish || pObj.nameHindi || '?') : (pMap[pId] || pId || '-');
+      // Sort groups by total movement Descending
+      groups.sort((a, b) => b.totalMove - a.totalMove);
+      console.log('Report Groups:', groups); // DEBUG LOG
+
+      const renderRow = (item, isGrouped) => {
+          const stats = item._stats || item; 
+          const pObj = stats.obj || item;
+          const pId = stats.id;
+          
+          const prodName = isGrouped 
+              ? (pObj.variantName || 'Base') 
+              : (pObj ? (pObj.nameEnglish || pObj.nameHindi || '?') : (pMap[pId] || pId || '-'));
 
           const fmt = (q) => {
               if(pObj && pObj.unit) return formatUnitQty(q, pObj.unit);
@@ -2696,27 +3051,29 @@ async function renderReport(){
           };
 
           const op = Number(openingMap[pId]||0);
-          const net = item.in - item.out;
+          const net = stats.in - stats.out;
           const closing = op + net;
 
           const opStr = fmt(op);
-          const inStr = fmt(item.in);
-          const outStr = fmt(item.out);
+          const inStr = fmt(stats.in);
+          const outStr = fmt(stats.out);
           const netStr = fmt(net);
           const closingStr = fmt(closing);
 
-          const rowText = `${prodName} ${opStr} ${inStr} ${outStr} ${netStr} ${closingStr}`.toLowerCase();
-          if(search && !rowText.includes(search)) return;
-
           totalOp += op;
-          totalIn += item.in;
-          totalOut += item.out;
+          totalIn += stats.in;
+          totalOut += stats.out;
           totalNet += net;
           totalClosing += closing;
 
           const tr = document.createElement('tr');
+          // Indent if grouped
+          const nameContent = isGrouped 
+              ? `<span class="ps-4">${prodName}</span>` 
+              : `<a href="#" onclick="showProductDetails('${pId}'); return false;">${prodName}</a>`;
+
           tr.innerHTML = `
-            <td><a href="#" onclick="showProductDetails('${pId}'); return false;">${prodName}</a></td>
+            <td>${nameContent}</td>
             <td class="text-end">${opStr}</td>
             <td class="text-end text-success">${inStr}</td>
             <td class="text-end text-primary"><a href="#" onclick="showOutBreakdown('${pId}'); return false;" class="text-decoration-none">${outStr}</a></td>
@@ -2725,7 +3082,42 @@ async function renderReport(){
           `;
           tbody.appendChild(tr);
           data.push([prodName, opStr, inStr, outStr, netStr, closingStr]);
-      }); 
+      };
+
+      // Helper to check visibility
+      const isVisible = (item) => {
+          if(!search) return true;
+          const stats = item._stats || item;
+          const pObj = stats.obj;
+          const pId = stats.id;
+          
+          const prodName = pObj ? (pObj.nameEnglish || pObj.nameHindi || '?') : (pMap[pId] || pId || '-');
+          const fmt = (q) => (pObj && pObj.unit) ? formatUnitQty(q, pObj.unit) : q;
+          
+          const op = Number(openingMap[pId]||0);
+          const net = stats.in - stats.out;
+          const closing = op + net;
+          
+          const rowText = `${prodName} ${fmt(op)} ${fmt(stats.in)} ${fmt(stats.out)} ${fmt(net)} ${fmt(closing)}`.toLowerCase();
+          return rowText.includes(search);
+      };
+
+      groups.forEach(g => {
+          const visibleItems = g.items.filter(isVisible);
+          if(visibleItems.length === 0) return;
+
+          if(g.hasVariants) {
+              const trHeader = document.createElement('tr');
+              trHeader.className = 'table-light fw-bold';
+              trHeader.innerHTML = `<td colspan="6">${g.name}</td>`;
+              tbody.appendChild(trHeader);
+              visibleItems.forEach(p => renderRow(p, true));
+          } else {
+              visibleItems.forEach(p => renderRow(p, false));
+          }
+      });
+      
+      orphanItems.filter(isVisible).forEach(item => renderRow(item, false)); 
 
       if(data.length > 0) {
           const tr = document.createElement('tr');
@@ -3084,7 +3476,7 @@ async function renderRatesTable(){
   tbody.innerHTML = '<tr><td colspan="3" class="text-center">Loading...</td></tr>';
   
   try {
-    const products = await api('/api/my/products');
+    const products = await api('/api/my/products?_t=' + Date.now());
     // Fetch product stats for sorting
     try {
         const stats = await api('/api/my/product-stats');
@@ -3110,40 +3502,54 @@ async function renderRatesTable(){
     
     tbody.innerHTML = '';
     
-    products.forEach(p => {
-       if(p.source === 'global' && !p.active) return;
+    const grouped = groupProducts(products);
+    
+    grouped.forEach(g => {
+       const items = g.items.filter(p => !(p.source === 'global' && !p.active));
+       if(items.length === 0) return;
        
-       const tr = document.createElement('tr');
-       const defPrice = distRateMap[p._id];
-       const retPrice = retRateMap[p._id];
-       
-       const u = p.unit;
-       const isCompound = u && String(u.type) === 'Compound';
-       const symbol = isCompound ? (u.firstUnit && u.firstUnit.symbol ? u.firstUnit.symbol : 'Unit') : (u ? u.symbol : 'Unit');
-       const label = `<span class="text-muted small">/ ${symbol}</span>`;
-
-       let defInput = '';
-       let retInput = '';
-       
-       if(retailerId){
-          // Retailer Mode: Default is Read-Only, Retailer is Input
-          defInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" disabled><span class="input-group-text">${symbol}</span></div>`;
-          retInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control rate-ret-inp" data-pid="${p._id}" value="${retPrice !== undefined ? Number(retPrice).toFixed(0) : ''}" placeholder="Override"><span class="input-group-text">${symbol}</span></div>`;
-       } else {
-          // Default Mode: Default is Input, Retailer is N/A
-          defInput = `<div class="input-group input-group-sm" style="min-width: 150px"><input type="number" step="1" class="form-control rate-def-inp" data-pid="${p._id}" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" placeholder="Set Default"><span class="input-group-text">${symbol}</span><button class="btn btn-outline-secondary" type="button" onclick="prepareRateHistory('${p._id}', '${p.nameEnglish}')" title="History"><i class="bi bi-clock-history"></i></button></div>`;
-          retInput = `<span class="text-muted">-</span>`;
+       if(g.hasVariants) {
+            const trHeader = document.createElement('tr');
+            trHeader.className = 'table-light fw-bold';
+            trHeader.innerHTML = `<td colspan="3">${g.name}</td>`;
+            tbody.appendChild(trHeader);
        }
        
-       tr.innerHTML = `
-         <td>
-           <div class="fw-bold small">${p.nameEnglish}</div>
-           <div class="text-muted small">${p.nameHindi||''}</div>
-         </td>
-         <td>${defInput}</td>
-         <td>${retInput}</td>
-       `;
-       tbody.appendChild(tr);
+       items.forEach(p => {
+           const tr = document.createElement('tr');
+           const defPrice = distRateMap[p._id];
+           const retPrice = retRateMap[p._id];
+           
+           const u = p.unit;
+           const isCompound = u && String(u.type) === 'Compound';
+           const symbol = isCompound ? (u.firstUnit && u.firstUnit.symbol ? u.firstUnit.symbol : 'Unit') : (u ? u.symbol : 'Unit');
+           
+           let defInput = '';
+           let retInput = '';
+           
+           if(retailerId){
+              // Retailer Mode: Default is Read-Only, Retailer is Input
+              defInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" disabled><span class="input-group-text">${symbol}</span></div>`;
+              retInput = `<div class="input-group input-group-sm"><input type="number" step="1" class="form-control rate-ret-inp" data-pid="${p._id}" value="${retPrice !== undefined ? Number(retPrice).toFixed(0) : ''}" placeholder="Override"><span class="input-group-text">${symbol}</span></div>`;
+           } else {
+              // Default Mode: Default is Input, Retailer is N/A
+              defInput = `<div class="input-group input-group-sm" style="min-width: 150px"><input type="number" step="1" class="form-control rate-def-inp" data-pid="${p._id}" value="${defPrice !== undefined ? Number(defPrice).toFixed(0) : ''}" placeholder="Set Default"><span class="input-group-text">${symbol}</span><button class="btn btn-outline-secondary" type="button" onclick="prepareRateHistory('${p._id}', '${p.nameEnglish}')" title="History"><i class="bi bi-clock-history"></i></button></div>`;
+              retInput = `<span class="text-muted">-</span>`;
+           }
+           
+           const nameClass = g.hasVariants ? 'ps-4' : '';
+           const displayName = g.hasVariants ? (p.variantName || 'Base') : p.nameEnglish;
+
+           tr.innerHTML = `
+             <td class="${nameClass}">
+               <div class="fw-bold small">${displayName}</div>
+               <div class="text-muted small">${p.nameHindi||''}</div>
+             </td>
+             <td>${defInput}</td>
+             <td>${retInput}</td>
+           `;
+           tbody.appendChild(tr);
+       });
     });
     
     // Attach event listeners
@@ -3230,14 +3636,14 @@ async function renderLedgerModal(retailer, triggerBtn) {
     
     // Refresh retailer to get latest balance
     try {
-        const retailers = await api('/api/my/retailers');
+        const retailers = await api('/api/my/retailers?_t=' + Date.now());
         const fresh = retailers.find(r => r._id === retailer._id);
         if (fresh) {
             qs('#ledgerBalance').textContent = '₹ ' + (fresh.currentBalance || 0).toFixed(2);
         }
     } catch {}
 
-    const transactions = await api(`/api/my/transactions?retailerId=${retailer._id}`);
+    const transactions = await api(`/api/my/transactions?retailerId=${retailer._id}&_t=` + Date.now());
     console.log('Ledger transactions:', transactions);
     const list = transactions.filter(m => m.type === 'order' || m.type === 'payment_cash' || m.type === 'payment_online' || m.type === 'adjustment');
     console.log('Filtered ledger list:', list);
@@ -3783,7 +4189,7 @@ async function saveStockEdit(){ ... }
 
 let currentAdjBaseBalance = 0;
 
-const updateAdjDynamicBalance = () => {
+function updateAdjDynamicBalance() {
   const balEl = qs('#adjCurrentBalance');
   const inputEl = qs('#adjAmount');
   const btn = qs('#adjSave');
@@ -3804,7 +4210,7 @@ const updateAdjDynamicBalance = () => {
   const newBal = base + val;
   balEl.textContent = '₹ ' + newBal.toFixed(2);
   balEl.className = 'fw-bold ' + (newBal>0 ? 'text-danger' : 'text-success');
-};
+}
 
 function prepareAdjustment(id, name, currentBalance){
   const nameEl = qs('#adjRetailerName');
