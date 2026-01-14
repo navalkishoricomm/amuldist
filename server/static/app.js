@@ -1102,53 +1102,57 @@ async function renderStockIn(editMove = null){
     if(dateInput && !dateInput.value){ dateInput.value = new Date().toISOString().split('T')[0]; }
 
     const sel = qs('#stockInSupplierSel');
-    const supBalanceEl = qs('#stockInSupBalance');
-    const billInp = qs('#stockInBillAmt');
     const tbody = qs('#stockInRows');
     const saveBtn = qs('#stockInSaveBtn');
-    const cashInp = qs('#stockInCash');
-    const onlineInp = qs('#stockInOnline');
-    const subtotalEl = qs('#stockInSubtotal');
+    const totalQtyEl = qs('#stockInTotalQty');
 
     const calcTotal = () => {
-        let total = 0;
+        let totalMCT = 0;
+        let totalBox = 0;
+        
         products.forEach(p => {
              const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
              const isCompound = u && String(u.type) === 'Compound';
              const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
-             let qty = 0;
+             let major = 0;
+             
              if(isCompound){
                const a = qs(`.in-first[data-id="${p._id}"]`);
-               const b = qs(`.in-second[data-id="${p._id}"]`);
-               qty = (Number(a && a.value || 0)*conv) + (Number(b && b.value || 0));
+               major = Number(a && a.value || 0);
              } else {
                const s = qs(`.in-simple[data-id="${p._id}"]`);
-               qty = Number(s && s.value || 0);
+               major = Number(s && s.value || 0);
              }
-             const price = Number(p.price) || 0;
-             total += qty * price;
+
+             // Check unit name to decide bucket
+             const uName = u ? (u.formalName || u.symbol || '').toLowerCase() : '';
+             if(uName.includes('mct') || uName.includes('crate')) {
+                 totalMCT += major;
+             } else {
+                 // Default to box/other
+                 totalBox += major;
+             }
         });
-        if(subtotalEl) subtotalEl.textContent = '₹' + total.toFixed(2);
+        
+        if(totalQtyEl) {
+            const parts = [];
+            if(totalMCT > 0) parts.push(`${totalMCT} MCT`);
+            if(totalBox > 0) parts.push(`${totalBox} Box`);
+            totalQtyEl.textContent = parts.length > 0 ? parts.join(' + ') : '0';
+        }
     };
 
-    const updateBalance = () => {
-      const sid = sel ? sel.value : '';
-      const s = suppliers.find(x => x._id === sid);
-      if(supBalanceEl){ const bal = s ? (Number(s.currentBalance)||0) : 0; supBalanceEl.textContent = '₹'+bal; supBalanceEl.className = 'fw-bold ' + (bal>0? 'text-danger':'text-success'); }
-    };
+    // Removed updateBalance as per request to remove supplier balance
 
     if(sel){
       const cur = editMove ? (editMove.supplierId && editMove.supplierId._id ? editMove.supplierId._id : editMove.supplierId) : sel.value;
       sel.innerHTML = '<option value="">Select Supplier</option>' + suppliers.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
       if(cur) sel.value = cur;
-      updateBalance();
-      sel.onchange = updateBalance;
       if(editMove) sel.disabled = true; else sel.disabled = false;
     }
 
     // Load existing IN moves for selected date+supplier
     let existingMap = {};
-    let outExistingMap = {};
     const loadExisting = async () => {
       existingMap = {};
       try {
@@ -1164,56 +1168,8 @@ async function renderStockIn(editMove = null){
         });
       } catch {}
     };
-    const loadExistingOut = async () => {
-      outExistingMap = {};
-      try {
-        const date = (dateInput && dateInput.value) ? dateInput.value : '';
-        const sid = sel ? sel.value : '';
-        if(!date || !sid) return;
-        const rangeDate = `from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`;
-        // Build ISO range (local) as an additional fallback
-        const d = new Date(date);
-        const startIso = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0).toISOString();
-        const endIso = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).toISOString();
-        const rangeIso = `from=${encodeURIComponent(startIso)}&to=${encodeURIComponent(endIso)}`;
-        // Query variants: supplier-filtered and day-all, both with date-string and ISO
-        const urls = [
-          `/api/my/stock-moves?type=OUT&supplierId=${encodeURIComponent(sid)}&${rangeDate}`,
-          `/api/my/stock-moves?type=OUT&${rangeDate}`,
-          `/api/my/stock-moves?type=OUT&supplierId=${encodeURIComponent(sid)}&${rangeIso}`,
-          `/api/my/stock-moves?type=OUT&${rangeIso}`,
-        ];
-        let moves = [];
-        for(const u of urls){
-          try {
-            const res = await api(u);
-            if(Array.isArray(res) && res.length) moves = moves.concat(res);
-          } catch {}
-        }
-        
-        // Deduplicate moves by _id
-        const uniqueMoves = [];
-        const seenIds = new Set();
-        moves.forEach(m => {
-          if (m._id && !seenIds.has(m._id)) {
-            seenIds.add(m._id);
-            uniqueMoves.push(m);
-          }
-        });
-
-        const agg = {};
-        uniqueMoves.forEach(m => {
-          const sObj = m.supplierId || null;
-          const mSid = sObj ? (sObj._id || sObj) : null;
-          if(!mSid || String(mSid) !== String(sid)) return;
-          const pid = m.productId && m.productId._id ? m.productId._id : m.productId;
-          agg[pid] = (agg[pid]||0) + (Number(m.quantity)||0);
-        });
-        Object.keys(agg).forEach(pid => { outExistingMap[pid] = { quantity: agg[pid] }; });
-      } catch(e) { console.error('loadExistingOut failed', e); }
-    };
+    // Removed loadExistingOut as per request to remove Out fields
     await loadExisting();
-    await loadExistingOut();
 
     if(dateInput) dateInput.onchange = async () => { await renderStockIn(); };
     if(sel) sel.onchange = async () => { await renderStockIn(); };
@@ -1238,13 +1194,7 @@ async function renderStockIn(editMove = null){
              </div>
              <div class="small text-muted sm-hide">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
           : `<input type="number" class="form-control form-control-sm qty-narrow in-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
-        const qtyOutSupCell = isCompound
-          ? `<div class="input-group input-group-sm">
-               <input type="number" class="form-control form-control-sm qty-narrow supout-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
-               <span class="input-group-text">+</span>
-               <input type="number" class="form-control form-control-sm qty-narrow supout-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
-             </div>`
-          : `<input type="number" class="form-control form-control-sm qty-narrow supout-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
+        
         const tr = document.createElement('tr');
         tr.id = `row-in-${p._id}`;
         
@@ -1256,9 +1206,7 @@ async function renderStockIn(editMove = null){
           <td class="${tdClass}">
             <div class="${nameClass}">${nameDisplay}</div>
           </td>
-          <td class="text-center col-stock d-none d-md-table-cell"><span class="badge ${curQty>0?'bg-success':'bg-secondary'}">${formatUnitQty(curQty, p.unit, unitMap)}</span></td>
           <td>${qtyInCell}</td>
-          <td>${qtyOutSupCell}</td>
         `;
 
         const ex = existingMap[p._id];
@@ -1278,23 +1226,6 @@ async function renderStockIn(editMove = null){
             if(s) s.value = Number(ex.quantity||0);
           }
         }
-        const exOut = outExistingMap[p._id];
-        if(exOut){
-          const u3 = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
-          const isC3 = u3 && String(u3.type) === 'Compound';
-          const conv3 = isC3 ? Number(u3.conversionFactor)||0 : 0;
-          if(isC3){
-            const major = Math.floor(Number(exOut.quantity||0)/conv3);
-            const minor = Number(exOut.quantity||0) % conv3;
-            const inp1 = tr.querySelector('.supout-first');
-            const inp2 = tr.querySelector('.supout-second');
-            if(inp1) inp1.value = major;
-            if(inp2) inp2.value = minor;
-          } else {
-            const s = tr.querySelector('.supout-simple');
-            if(s) s.value = Number(exOut.quantity||0);
-          }
-        }
         return tr;
       };
 
@@ -1302,7 +1233,7 @@ async function renderStockIn(editMove = null){
          if(g.hasVariants) {
              const trHeader = document.createElement('tr');
              trHeader.className = 'table-light fw-bold';
-             trHeader.innerHTML = `<td colspan="4">${g.name}</td>`;
+             trHeader.innerHTML = `<td colspan="2">${g.name}</td>`;
              tbody.appendChild(trHeader);
              
              g.items.forEach(p => {
@@ -1317,7 +1248,6 @@ async function renderStockIn(editMove = null){
       
       // Auto-convert listeners
       qsa('.in-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
-      qsa('.supout-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
 
       // Calc Total listeners
       qsa('.in-first').forEach(i => i.addEventListener('input', calcTotal));
@@ -1399,7 +1329,7 @@ async function renderStockIn(editMove = null){
           const date = dateInput ? dateInput.value : '';
           if(!date) throw new Error('Select date');
           const ops = [];
-          const outOps = [];
+          
           products.forEach(p => {
             const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
             const isCompound = u && String(u.type) === 'Compound';
@@ -1413,15 +1343,7 @@ async function renderStockIn(editMove = null){
               const s = qs(`.in-simple[data-id="${p._id}"]`);
               qty = Number(s && s.value || 0);
             }
-            let outQty = 0;
-            if(isCompound){
-              const oa = qs(`.supout-first[data-id="${p._id}"]`);
-              const ob = qs(`.supout-second[data-id="${p._id}"]`);
-              outQty = (Number(oa && oa.value || 0)*conv) + (Number(ob && ob.value || 0));
-            } else {
-              const os = qs(`.supout-simple[data-id="${p._id}"]`);
-              outQty = Number(os && os.value || 0);
-            }
+            
             const existing = existingMap[p._id];
             if(existing){
               const curQty = Number(existing.quantity)||0;
@@ -1432,13 +1354,10 @@ async function renderStockIn(editMove = null){
             } else {
               if(qty > 0){ ops.push({ type:'create', productId: p._id, quantity: qty }); }
             }
-            // Send outQty if it differs from existing (allowing 0 to clear)
-            const exOutQty = outExistingMap[p._id] ? (Number(outExistingMap[p._id].quantity)||0) : 0;
-            if(outQty !== exOutQty){
-               outOps.push({ productId: p._id, quantity: outQty });
-            }
           });
-          if(ops.length === 0 && outOps.length === 0) throw new Error('No changes');
+          
+          if(ops.length === 0) throw new Error('No changes');
+          
           let ok = 0; let errs = [];
           for(const op of ops){
             try{
@@ -1452,31 +1371,12 @@ async function renderStockIn(editMove = null){
               ok++;
             }catch(e){ errs.push(e.message||'stock-in error'); }
           }
-          if(outOps.length > 0){
-            try{
-              await api('/api/my/stock-out-supplier', { method:'POST', body: JSON.stringify({ supplierId, items: outOps, createdAt: date }) });
-              ok += outOps.length;
-            }catch(e){ errs.push(e.message||'supplier out error'); }
-          }
-          const billAmount = Number(billInp && billInp.value || 0);
-          if(billAmount > 0){
-            try{ await api(`/api/my/suppliers/${supplierId}/bills`,{ method:'POST', body: JSON.stringify({ amount: billAmount }) }); }catch(e){ errs.push(e.message||'bill error'); }
-          }
-          const cash = Number(cashInp && cashInp.value || 0);
-          const online = Number(onlineInp && onlineInp.value || 0);
-          if(cash>0 || online>0){
-            try{ await api(`/api/my/suppliers/${supplierId}/payments`,{ method:'POST', body: JSON.stringify({ cashAmount: cash, onlineAmount: online }) }); }catch(e){ errs.push(e.message||'payment error'); }
-          }
+          
           if(errs.length){ alert(`Processed ${ok} items. Errors: \n${errs.join('\n')}`); } else { alert('Saved'); }
-          billInp && (billInp.value = 0);
-          cashInp && (cashInp.value = 0);
-          onlineInp && (onlineInp.value = 0);
+          
           qsa('.in-first').forEach(i => i.value = '');
           qsa('.in-second').forEach(i => i.value = '');
           qsa('.in-simple').forEach(i => i.value = '');
-          qsa('.supout-first').forEach(i => i.value = '');
-          qsa('.supout-second').forEach(i => i.value = '');
-          qsa('.supout-simple').forEach(i => i.value = '');
           renderStockIn();
         } catch(e){ alert(e.message); }
         finally {

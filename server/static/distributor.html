@@ -368,59 +368,37 @@
           <div class="col-12">
             <div class="card p-3 shadow-sm border-0">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="fw-bold">Stock In</div>
-                <button class="btn btn-outline-secondary btn-sm" onclick="renderStockIn()"><i class="bi bi-arrow-repeat"></i></button>
+                 <div class="fw-bold">Stock In</div>
+                 <div class="d-flex align-items-center gap-2">
+                     <span class="badge bg-secondary">Total: <span id="stockInTotalQty">0</span></span>
+                 </div>
               </div>
-              <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded">
-                <div class="flex-grow-1">
-                  <label class="form-label mb-0 small fw-bold">Date</label>
-                  <input type="date" id="stockInDate" class="form-control form-control-sm">
-                </div>
-                <div class="flex-grow-1">
-                  <label class="form-label mb-0 small fw-bold">Supplier</label>
-                  <div class="input-group input-group-sm">
-                    <select id="stockInSupplierSel" class="form-select"></select>
-                    <button class="btn btn-outline-primary" onclick="addSupplierPrompt()"><i class="bi bi-plus"></i></button>
-                  </div>
-                </div>
+              <div class="row g-2 mb-3">
+                 <div class="col-12 col-md-4">
+                    <label class="small text-muted">Date</label>
+                    <input type="date" id="stockInDate" class="form-control form-control-sm">
+                 </div>
+                 <div class="col-12 col-md-4">
+                    <label class="small text-muted">Supplier</label>
+                    <select id="stockInSupplierSel" class="form-select form-select-sm"></select>
+                 </div>
               </div>
-              <div class="table-responsive" style="max-height: 60vh; overflow-y: auto;">
-                <table class="table table-sm table-hover align-middle">
-                  <thead class="table-light sticky-top">
-                    <tr>
-                      <th style="width: 40%">Product</th>
-                      <th style="width: 15%" class="text-center col-stock d-none d-md-table-cell">Cur</th>
-                      <th style="width: 25%">In Qty</th>
-                      <th style="width: 20%">Out to Supplier</th>
-                    </tr>
-                  </thead>
-                  <tbody id="stockInRows"></tbody>
+
+              <!-- Product Table -->
+              <div class="table-responsive mb-3" style="max-height:60vh">
+                <table class="table table-sm align-middle mb-0">
+                   <thead>
+                     <tr>
+                       <th>Product</th>
+                       <th style="width:150px">In Qty</th>
+                     </tr>
+                   </thead>
+                   <tbody id="stockInRows"></tbody>
                 </table>
               </div>
-              <div class="row g-2 mt-2">
-                <div class="col-12 col-md-4">
-                  <label class="form-label mb-0 small text-muted">Subtotal</label>
-                  <div id="stockInSubtotal" class="fw-bold">₹0</div>
-                </div>
-                <div class="col-6 col-md-4">
-                  <label class="form-label mb-0 small">Bill Amount</label>
-                  <input id="stockInBillAmt" type="number" class="form-control form-control-sm" min="0" value="0">
-                </div>
-                <div class="col-6 col-md-4">
-                  <label class="form-label mb-0 small">Supplier Balance</label>
-                  <div id="stockInSupBalance" class="fw-bold text-danger">₹0</div>
-                </div>
-                <div class="col-6 col-md-6">
-                  <label class="form-label mb-0 small">Cash</label>
-                  <input id="stockInCash" type="number" class="form-control form-control-sm" min="0" value="0">
-                </div>
-                <div class="col-6 col-md-6">
-                  <label class="form-label mb-0 small">Online</label>
-                  <input id="stockInOnline" type="number" class="form-control form-control-sm" min="0" value="0">
-                </div>
-              </div>
-              <div class="mt-3 text-end border-top pt-3">
-                <button id="stockInSaveBtn" class="btn btn-success w-100"><i class="bi bi-download"></i> Save Stock In & Payments</button>
+
+              <div class="d-grid">
+                <button id="stockInSaveBtn" class="btn btn-success">Save Stock In</button>
               </div>
             </div>
           </div>
