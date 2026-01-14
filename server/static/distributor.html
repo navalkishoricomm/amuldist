@@ -450,10 +450,7 @@
             <div class="card p-3 shadow-sm border-0">
               <div class="d-flex justify-content-between align-items-center mb-2">
                 <div class="fw-bold">Stock Out</div>
-                <div class="d-flex align-items-center gap-3">
-                  <div class="small text-muted">Balance: <span id="stockOutCurBalance" class="fw-bold">₹0</span></div>
-                  <button class="btn btn-outline-secondary btn-sm" onclick="renderStockOut()"><i class="bi bi-arrow-repeat"></i></button>
-                </div>
+                <button class="btn btn-outline-secondary btn-sm" onclick="renderStockOut()"><i class="bi bi-arrow-repeat"></i></button>
               </div>
               <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded">
                 <div class="flex-grow-1">
@@ -473,10 +470,14 @@
                   <tbody id="stockOutRows"></tbody>
                 </table>
               </div>
+              <div class="d-flex justify-content-end mt-2">
+                <div class="small text-muted me-2">Subtotal</div>
+                <div id="stockOutSubtotal" class="fw-bold">₹0</div>
+              </div>
               <div class="row g-2 mt-2">
                 <div class="col-12 col-md-4">
-                  <label class="form-label mb-0 small text-muted">Subtotal</label>
-                  <div id="stockOutSubtotal" class="fw-bold">₹0</div>
+                  <label class="form-label mb-0 small text-muted">Balance</label>
+                  <div class="fw-bold">₹<span id="stockOutCurBalance">0</span></div>
                 </div>
                 <div class="col-6 col-md-4">
                   <label class="form-label mb-0 small">Cash</label>
