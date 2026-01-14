@@ -1153,6 +1153,7 @@ async function renderStockIn(editMove = null){
 
     // Load existing IN moves for selected date+supplier
     let existingMap = {};
+    let outExistingMap = {};
     const loadExisting = async () => {
       existingMap = {};
       try {
@@ -1168,8 +1169,24 @@ async function renderStockIn(editMove = null){
         });
       } catch {}
     };
-    // Removed loadExistingOut as per request to remove Out fields
+    const loadExistingOut = async () => {
+      outExistingMap = {};
+      try {
+        const date = (dateInput && dateInput.value) ? dateInput.value : '';
+        const sid = sel ? sel.value : '';
+        if(!date || !sid) return;
+        const range = `from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`;
+        const url = `/api/my/stock-moves?type=OUT&supplierId=${encodeURIComponent(sid)}&${range}`;
+        const moves = await api(url);
+        moves.forEach(m => {
+          const pid = m.productId && m.productId._id ? m.productId._id : m.productId;
+          const qty = Number(m.quantity) || 0;
+          outExistingMap[pid] = (outExistingMap[pid] || 0) + qty;
+        });
+      } catch {}
+    };
     await loadExisting();
+    await loadExistingOut();
 
     if(dateInput) dateInput.onchange = async () => { await renderStockIn(); };
     if(sel) sel.onchange = async () => { await renderStockIn(); };
@@ -1185,7 +1202,6 @@ async function renderStockIn(editMove = null){
         const first = isCompound ? (u.firstUnit && typeof u.firstUnit === 'object' ? u.firstUnit : (u.firstUnit && u.firstUnit.symbol ? u.firstUnit : unitMap[u.firstUnit])) : null;
         const second = isCompound ? (u.secondUnit && typeof u.secondUnit === 'object' ? u.secondUnit : (u.secondUnit && u.secondUnit.symbol ? u.secondUnit : unitMap[u.secondUnit])) : null;
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
-        const curQty = invMap[p._id] || 0;
         const qtyInCell = isCompound
           ? `<div class="input-group input-group-sm">
                <input type="number" class="form-control form-control-sm qty-narrow in-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
@@ -1194,6 +1210,13 @@ async function renderStockIn(editMove = null){
              </div>
              <div class="small text-muted sm-hide">${first?first.symbol:''} × ${conv} = ${second?second.symbol:''}</div>`
           : `<input type="number" class="form-control form-control-sm qty-narrow in-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
+        const outQtyCell = isCompound
+          ? `<div class="input-group input-group-sm">
+               <input type="number" class="form-control form-control-sm qty-narrow supout-first" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${first?first.symbol:'Base'}">
+               <span class="input-group-text">+</span>
+               <input type="number" class="form-control form-control-sm qty-narrow supout-second" data-id="${p._id}" data-conv="${conv}" min="0" placeholder="${second?second.symbol:'Unit'}">
+             </div>`
+          : `<input type="number" class="form-control form-control-sm qty-narrow supout-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         
         const tr = document.createElement('tr');
         tr.id = `row-in-${p._id}`;
@@ -1207,6 +1230,7 @@ async function renderStockIn(editMove = null){
             <div class="${nameClass}">${nameDisplay}</div>
           </td>
           <td>${qtyInCell}</td>
+          <td>${outQtyCell}</td>
         `;
 
         const ex = existingMap[p._id];
@@ -1224,6 +1248,24 @@ async function renderStockIn(editMove = null){
           } else {
             const s = tr.querySelector('.in-simple');
             if(s) s.value = Number(ex.quantity||0);
+          }
+        }
+
+        const exOutQty = outExistingMap[p._id] ? Number(outExistingMap[p._id]) || 0 : 0;
+        if(exOutQty){
+          const u3 = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
+          const isC3 = u3 && String(u3.type) === 'Compound';
+          const conv3 = isC3 ? Number(u3.conversionFactor)||0 : 0;
+          if(isC3 && conv3 > 0){
+            const majorO = Math.floor(exOutQty/conv3);
+            const minorO = exOutQty % conv3;
+            const o1 = tr.querySelector('.supout-first');
+            const o2 = tr.querySelector('.supout-second');
+            if(o1) o1.value = majorO;
+            if(o2) o2.value = minorO;
+          } else {
+            const os = tr.querySelector('.supout-simple');
+            if(os) os.value = exOutQty;
           }
         }
         return tr;
@@ -1248,6 +1290,7 @@ async function renderStockIn(editMove = null){
       
       // Auto-convert listeners
       qsa('.in-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
+      qsa('.supout-second').forEach(i => i.addEventListener('change', autoConvertSecondUnit));
 
       // Calc Total listeners
       qsa('.in-first').forEach(i => i.addEventListener('input', calcTotal));
@@ -1329,6 +1372,7 @@ async function renderStockIn(editMove = null){
           const date = dateInput ? dateInput.value : '';
           if(!date) throw new Error('Select date');
           const ops = [];
+          const outItems = [];
           
           products.forEach(p => {
             const u = p.unit ? (typeof p.unit === 'object' ? p.unit : unitMap[p.unit]) : null;
@@ -1354,9 +1398,23 @@ async function renderStockIn(editMove = null){
             } else {
               if(qty > 0){ ops.push({ type:'create', productId: p._id, quantity: qty }); }
             }
+
+            let outQty = 0;
+            if(isCompound){
+              const oa = qs(`.supout-first[data-id="${p._id}"]`);
+              const ob = qs(`.supout-second[data-id="${p._id}"]`);
+              outQty = (Number(oa && oa.value || 0)*conv) + (Number(ob && ob.value || 0));
+            } else {
+              const os = qs(`.supout-simple[data-id="${p._id}"]`);
+              outQty = Number(os && os.value || 0);
+            }
+            const prevOut = outExistingMap[p._id] ? Number(outExistingMap[p._id]) || 0 : 0;
+            if(outQty !== prevOut){
+              outItems.push({ productId: p._id, quantity: outQty });
+            }
           });
           
-          if(ops.length === 0) throw new Error('No changes');
+          if(ops.length === 0 && outItems.length === 0) throw new Error('No changes');
           
           let ok = 0; let errs = [];
           for(const op of ops){
@@ -1371,12 +1429,22 @@ async function renderStockIn(editMove = null){
               ok++;
             }catch(e){ errs.push(e.message||'stock-in error'); }
           }
+
+          if(outItems.length){
+            try{
+              await api('/api/my/stock-out-supplier', { method:'POST', body: JSON.stringify({ supplierId, items: outItems, createdAt: date }) });
+              ok += outItems.length;
+            }catch(e){ errs.push(e.message||'supplier out error'); }
+          }
           
           if(errs.length){ alert(`Processed ${ok} items. Errors: \n${errs.join('\n')}`); } else { alert('Saved'); }
           
           qsa('.in-first').forEach(i => i.value = '');
           qsa('.in-second').forEach(i => i.value = '');
           qsa('.in-simple').forEach(i => i.value = '');
+          qsa('.supout-first').forEach(i => i.value = '');
+          qsa('.supout-second').forEach(i => i.value = '');
+          qsa('.supout-simple').forEach(i => i.value = '');
           renderStockIn();
         } catch(e){ alert(e.message); }
         finally {
