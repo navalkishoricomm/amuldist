@@ -182,6 +182,11 @@
                   <i class="bi bi-people me-2"></i> Retailers
                 </button>
               </li>
+              <li class="nav-item d-none" id="nav-sd-wrapper">
+                <button id="nav-sd" class="nav-link w-100 text-start" data-bs-target="#tab-sd" data-bs-dismiss="offcanvas">
+                  <i class="bi bi-diagram-3 me-2"></i> Distributors (SD)
+                </button>
+              </li>
               <li class="nav-item">
                 <button id="nav-reports" class="nav-link w-100 text-start" data-bs-target="#tab-reports" data-bs-dismiss="offcanvas">
                   <i class="bi bi-clipboard-data me-2"></i> Reports
@@ -611,6 +616,53 @@
                   <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
                   <tbody id="staffList"></tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Super Distributor Tab -->
+      <div class="tab-pane fade" id="tab-sd" role="tabpanel">
+        <div class="row g-3 animate__animated animate__fadeIn">
+          <div class="col-12">
+            <div class="card p-3 shadow-sm border-0">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-bold">Distributors</div>
+                <button class="btn btn-sm btn-primary" id="sdAddDistributorBtn"><i class="bi bi-plus"></i> Add Distributor</button>
+              </div>
+              <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Phone</th>
+                      <th>Status</th>
+                      <th class="text-end">Balance</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sdDistributorsBody"></tbody>
+                </table>
+              </div>
+              <div id="sdRetailerSection" class="d-none">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="fw-bold">Retailers under selected distributor</div>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Status</th>
+                        <th class="text-end">Balance</th>
+                        <th class="text-end">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sdRetailersBody"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

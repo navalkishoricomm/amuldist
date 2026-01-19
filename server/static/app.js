@@ -258,7 +258,7 @@ async function login(){
     const res = await api('/api/auth/login', { method:'POST', body: JSON.stringify({ email, password }) });
     setToken(res.token, res.user.role);
     if(res.user.role==='admin') location.href = uiHref('admin');
-    else if(res.user.role==='distributor' || res.user.role==='staff') location.href = uiHref('distributor');
+    else if(res.user.role==='distributor' || res.user.role==='staff' || res.user.role==='super_distributor') location.href = uiHref('distributor');
     else if(res.user.role==='retailer') location.href = uiHref('retailer');
     else alert('Unknown role');
   }catch(e){ alert(e.message); }
@@ -309,7 +309,7 @@ function saveServerUrl() {
   }
 }
 
-async function checkRoleAndRedirect(expected){ try{ const me=await api('/api/me'); const role=me&&me.role; if(expected==='admin' && role!=='admin'){ location.href = uiHref('index'); return; } if(expected==='distributor' && role!=='distributor' && role!=='staff'){ location.href = uiHref('index'); return; } if(expected==='retailer' && role!=='retailer'){ location.href = uiHref('index'); return; } return me; }catch{ location.href = uiHref('index'); } }
+async function checkRoleAndRedirect(expected){ try{ const me=await api('/api/me'); const role=me&&me.role; if(expected==='admin' && role!=='admin'){ location.href = uiHref('index'); return; } if(expected==='distributor' && role!=='distributor' && role!=='staff' && role!=='super_distributor'){ location.href = uiHref('index'); return; } if(expected==='retailer' && role!=='retailer'){ location.href = uiHref('index'); return; } return me; }catch{ location.href = uiHref('index'); } }
 
 async function loadAdmin(){
   await checkRoleAndRedirect('admin');
@@ -568,17 +568,17 @@ window.switchTab = (id, pushHistory = true) => {
   if(id==='tab-staff') { loadStaff(); bindStaffForm(); }
   if(id==='tab-rates') { loadDistRates(); }
   if(id==='tab-reports') { renderReport(); bindReportActions(); }
+  if(id==='tab-sd') { renderSdDistributors(); }
 };
 
 async function loadDistributor(){
   // Tabs
-  const tabs = ['dashboard','products','inventory','stock-in','stock-out','stock-wastage','rates','retailers','reports','staff'];
+  const tabs = ['dashboard','products','inventory','stock-in','stock-out','stock-wastage','rates','retailers','reports','staff','sd'];
   // window.switchTab is already defined above
 
   tabs.forEach(t => {
      const btn = qs(`#nav-${t}`);
      if(btn) btn.onclick = () => window.switchTab(`tab-${t}`);
-     // Mobile quick actions
      const qa = qs(`#qa-${t}`);
      if(qa) qa.onclick = () => window.switchTab(`tab-${t}`);
   });
@@ -651,7 +651,13 @@ async function loadDistributor(){
     const brand = qs('#navbarBrand');
     if(brand) {
        if(me.role === 'staff') brand.textContent = `${me.name} Panel`;
-       else brand.textContent = `Distributor Dashboard - ${me.name}`;
+       else if(me.role === 'super_distributor') {
+         brand.textContent = `Super Distributor Dashboard - ${me.name}`;
+         const navWrap = qs('#nav-sd-wrapper');
+         if(navWrap) navWrap.classList.remove('d-none');
+       } else {
+         brand.textContent = `Distributor Dashboard - ${me.name}`;
+       }
     }
   }
   
@@ -678,8 +684,202 @@ async function loadDistributor(){
     if(!(p.includes('view_retailers') || p.includes('add_retailer') || p.includes('payment_cash') || p.includes('payment_online'))) hideIt('retailers');
   }
   
+  if(me.role === 'super_distributor'){
+    const addBtn = qs('#sdAddDistributorBtn');
+    if(addBtn) addBtn.onclick = sdAddDistributor;
+  }
+  
   loadDistDashboard();
 }
+
+async function renderSdDistributors(){
+  try{
+    const tbody = qs('#sdDistributorsBody');
+    if(!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>';
+    const items = await api('/api/sd/accounts/summary');
+    if(!items.length){
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No distributors found.</td></tr>';
+      return;
+    }
+    const rows = items.map(d => {
+      const balance = Number(d.balance || 0);
+      const isActive = d.active === undefined ? true : !!d.active;
+      const badge = isActive ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>';
+      const balCls = balance > 0 ? 'text-danger' : (balance < 0 ? 'text-success' : 'text-muted');
+      const id = d.distributorId || d._id;
+      return `
+        <tr data-id="${id}">
+          <td>${d.name||'-'}</td>
+          <td>${d.email||'-'}</td>
+          <td>${d.phone||'-'}</td>
+          <td>${badge}</td>
+          <td class="text-end ${balCls}">${balance.toFixed(2)}</td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary me-1" onclick="sdViewRetailers('${id}')"><i class="bi bi-people"></i></button>
+            <button class="btn btn-sm btn-outline-secondary me-1" onclick="sdEditDistributor('${id}')"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-success me-1" onclick="sdAddPayment('${id}')"><i class="bi bi-cash-coin"></i></button>
+            <button class="btn btn-sm btn-outline-warning me-1" onclick="sdAddStockOut('${id}')"><i class="bi bi-box-arrow-up"></i></button>
+            <button class="btn btn-sm btn-outline-danger" onclick="sdToggleDistributor('${id}', ${isActive})"><i class="bi bi-power"></i></button>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = rows.join('');
+  }catch(e){
+    const tbody = qs('#sdDistributorsBody');
+    if(tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-danger text-center">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function sdViewRetailers(distId){
+  try{
+    const section = qs('#sdRetailerSection');
+    const tbody = qs('#sdRetailersBody');
+    if(!section || !tbody) return;
+    section.classList.remove('d-none');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>';
+    const items = await api(`/api/sd/retailers?distributorId=${encodeURIComponent(distId)}`);
+    if(!items.length){
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No retailers found.</td></tr>';
+      return;
+    }
+    const rows = items.map(r => {
+      const badge = r.active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>';
+      const bal = Number(r.currentBalance || 0);
+      const balCls = bal > 0 ? 'text-danger' : (bal < 0 ? 'text-success' : 'text-muted');
+      return `
+        <tr>
+          <td>${r.name}</td>
+          <td>${r.phone||'-'}</td>
+          <td>${badge}</td>
+          <td class="text-end ${balCls}">${bal.toFixed(2)}</td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-primary" onclick="sdEditRetailer('${r._id}')"><i class="bi bi-pencil"></i></button>
+          </td>
+        </tr>
+      `;
+    });
+    tbody.innerHTML = rows.join('');
+  }catch(e){
+    const tbody = qs('#sdRetailersBody');
+    if(tbody) tbody.innerHTML = `<tr><td colspan="5" class="text-danger text-center">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function sdAddDistributor(){
+  try{
+    const name = prompt('Distributor name','');
+    if(!name) return;
+    const email = prompt('Email','');
+    if(!email) return;
+    const password = prompt('Password for distributor login','');
+    if(!password) return;
+    const phone = prompt('Phone','') || '';
+    const address = prompt('Address','') || '';
+    await api('/api/sd/distributors', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, phone, password, address })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+async function sdEditRetailer(id){
+  try{
+    const items = await api('/api/sd/retailers');
+    const r = items.find(x => x._id === id);
+    if(!r) return;
+    const name = prompt('Retailer name', r.name || '');
+    if(name === null) return;
+    const phone = prompt('Phone', r.phone || '');
+    if(phone === null) return;
+    const address = prompt('Address', r.address || '');
+    if(address === null) return;
+    await api(`/api/sd/retailers/${id}`,{
+      method:'PATCH',
+      body: JSON.stringify({ name, phone, address })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+async function sdAddPayment(distId){
+  try{
+    const type = prompt('Payment type: cash / online / adjust','cash');
+    if(!type) return;
+    let mapped = '';
+    if(type.toLowerCase()==='cash') mapped='payment_cash';
+    else if(type.toLowerCase()==='online') mapped='payment_online';
+    else mapped='adjustment';
+    const amtStr = prompt('Amount','0');
+    if(!amtStr) return;
+    const amount = Number(amtStr);
+    if(!amount || amount<=0){ alert('Invalid amount'); return; }
+    const note = prompt('Note','');
+    await api(`/api/sd/distributors/${distId}/accounts/payments`,{
+      method:'POST',
+      body: JSON.stringify({ type: mapped, amount, note })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+async function sdAddStockOut(distId){
+  try{
+    const amtStr = prompt('Stock value amount','0');
+    if(!amtStr) return;
+    const amount = Number(amtStr);
+    if(!amount || amount<=0){ alert('Invalid amount'); return; }
+    const note = prompt('Note','Stock OUT');
+    await api(`/api/sd/distributors/${distId}/accounts/payments`,{
+      method:'POST',
+      body: JSON.stringify({ type: 'stock_out', amount, note })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+async function sdEditDistributor(id){
+  try{
+    const items = await api('/api/sd/distributors');
+    const d = items.find(x => x._id === id);
+    if(!d) return;
+    const name = prompt('Distributor name', d.name || '');
+    if(name === null) return;
+    const phone = prompt('Phone', d.phone || '');
+    if(phone === null) return;
+    const address = prompt('Address', d.address || '');
+    if(address === null) return;
+    await api(`/api/sd/distributors/${id}`,{
+      method:'PATCH',
+      body: JSON.stringify({ name, phone, address })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+async function sdToggleDistributor(id, isActive){
+  try{
+    const next = !isActive;
+    const msg = next ? 'Activate this distributor?' : 'Deactivate this distributor?';
+    if(!confirm(msg)) return;
+    await api(`/api/sd/distributors/${id}`,{
+      method:'PATCH',
+      body: JSON.stringify({ active: next })
+    });
+    renderSdDistributors();
+  }catch(e){ alert(e.message); }
+}
+
+window.renderSdDistributors = renderSdDistributors;
+window.sdViewRetailers = sdViewRetailers;
+window.sdEditRetailer = sdEditRetailer;
+window.sdAddPayment = sdAddPayment;
+window.sdAddDistributor = sdAddDistributor;
+window.sdAddStockOut = sdAddStockOut;
+window.sdEditDistributor = sdEditDistributor;
+window.sdToggleDistributor = sdToggleDistributor;
 
 async function loadDistDashboard(){
   try{

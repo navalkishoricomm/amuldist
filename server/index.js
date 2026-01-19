@@ -25,12 +25,13 @@ const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, unique: true, lowercase: true, trim: true, sparse: true },
-    role: { type: String, enum: ['admin', 'distributor', 'retailer', 'staff'], required: true },
+    role: { type: String, enum: ['admin', 'distributor', 'retailer', 'staff', 'super_distributor'], required: true },
     active: { type: Boolean, default: true },
     passwordHash: { type: String, required: true },
     phone: { type: String, unique: true, trim: true, sparse: true },
     address: { type: String },
     distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    superDistributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     permissions: [{ type: String }],
     createdByStaffId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     currentBalance: { type: Number, default: 0 },
@@ -233,6 +234,18 @@ const transactionSchema = new mongoose.Schema(
 );
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
+const distributorTransactionSchema = new mongoose.Schema(
+  {
+    superDistributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    distributorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    type: { type: String, enum: ['stock_out', 'payment_cash', 'payment_online', 'adjustment'], required: true },
+    amount: { type: Number, required: true },
+    note: { type: String },
+  },
+  { timestamps: true }
+);
+const DistributorTransaction = mongoose.model('DistributorTransaction', distributorTransactionSchema);
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -267,7 +280,7 @@ async function auth(req, res, next) {
     req.user = user;
     next();
   } catch (e) {
-    console.log('Auth failed: Exception', e.message);
+    console.log('Auth failed: Exception', e.message, e.stack);
     return res.status(401).json({ error: 'unauthorized' });
   }
 }
@@ -287,6 +300,7 @@ function requireDistributorOrStaff(permission) {
     if (!req.user) return res.status(403).json({ error: 'forbidden' });
     if (req.user.role === 'admin') return next();
     if (req.user.role === 'distributor') return next();
+    if (req.user.role === 'super_distributor') return next();
     if (req.user.role === 'staff') {
       if (permission && !req.user.permissions.includes(permission)) {
         return res.status(403).json({ error: 'forbidden: missing permission ' + permission });
@@ -301,6 +315,7 @@ function getContext(req) {
   if (req.user.role === 'admin') return { distributorId: null, staffId: null, isAdmin: true };
   if (req.user.role === 'distributor') return { distributorId: req.user._id, staffId: null };
   if (req.user.role === 'staff') return { distributorId: req.user.distributorId, staffId: req.user._id };
+  if (req.user.role === 'super_distributor') return { distributorId: req.user._id, staffId: null };
   return { distributorId: null, staffId: null };
 }
 
@@ -361,18 +376,23 @@ app.delete('/api/my/staff/:id', auth, requireDistributor, async (req, res) => {
 });
 
 function requireAdminOrDistributor(req, res, next) {
-  if (!req.user || !['admin', 'distributor'].includes(req.user.role)) return res.status(403).json({ error: 'forbidden' });
+  if (!req.user || !['admin', 'distributor', 'super_distributor'].includes(req.user.role)) return res.status(403).json({ error: 'forbidden' });
   next();
 }
 
 function requireReadAccess(req, res, next) {
   // console.log('requireReadAccess', req.user ? req.user.role : 'no-user');
-  if (!req.user || !['admin', 'distributor', 'staff'].includes(req.user.role)) return res.status(403).json({ error: 'forbidden' });
+  if (!req.user || !['admin', 'distributor', 'staff', 'super_distributor'].includes(req.user.role)) return res.status(403).json({ error: 'forbidden' });
   next();
 }
 
 function requireRetailer(req, res, next) {
   if (!req.user || req.user.role !== 'retailer') return res.status(403).json({ error: 'forbidden' });
+  next();
+}
+
+function requireSuperDistributor(req, res, next) {
+  if (!req.user || req.user.role !== 'super_distributor') return res.status(403).json({ error: 'forbidden' });
   next();
 }
 
@@ -401,6 +421,109 @@ app.post('/api/users', auth, requireAdmin, async (req, res) => {
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'email already exists' });
     res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+app.get('/api/sd/distributors', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const items = await User.find({ role: 'distributor', superDistributorId: req.user._id }).sort({ sortOrder: 1, createdAt: -1 });
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list distributors' });
+  }
+});
+
+app.post('/api/sd/distributors', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { name, email, phone, password, address } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password are required' });
+    const exists = await User.findOne({ email: String(email).toLowerCase() });
+    if (exists) return res.status(409).json({ error: 'email already exists' });
+    const passwordHash = await bcrypt.hash(String(password), 10);
+    const doc = await User.create({
+      name,
+      email: String(email).toLowerCase(),
+      role: 'distributor',
+      active: true,
+      passwordHash,
+      phone,
+      address,
+      superDistributorId: req.user._id,
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'duplicate key' });
+    res.status(500).json({ error: 'Failed to create distributor' });
+  }
+});
+
+app.patch('/api/sd/distributors/:id', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, address, active, password, sortOrder } = req.body;
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    if (name !== undefined) d.name = name;
+    if (phone !== undefined) d.phone = phone;
+    if (address !== undefined) d.address = address;
+    if (typeof active === 'boolean') d.active = active;
+    if (sortOrder !== undefined) d.sortOrder = Number(sortOrder) || 0;
+    if (password) d.passwordHash = await bcrypt.hash(String(password), 10);
+    await d.save();
+    res.json(d);
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'duplicate key' });
+    res.status(500).json({ error: 'Failed to update distributor' });
+  }
+});
+
+app.delete('/api/sd/distributors/:id', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    d.active = false;
+    await d.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to deactivate distributor' });
+  }
+});
+
+app.get('/api/sd/retailers', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { distributorId } = req.query;
+    const filter = { role: 'distributor', superDistributorId: req.user._id };
+    if (distributorId) filter._id = distributorId;
+    const distributors = await User.find(filter).select('_id');
+    if (!distributors.length) return res.json([]);
+    const ids = distributors.map(d => d._id);
+    const retailers = await User.find({ role: 'retailer', distributorId: { $in: ids } }).sort({ sortOrder: 1, createdAt: -1 });
+    res.json(retailers);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list retailers' });
+  }
+});
+
+app.patch('/api/sd/retailers/:id', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, address, active, sortOrder, password } = req.body;
+    const r = await User.findOne({ _id: id, role: 'retailer' }).populate('distributorId');
+    if (!r || !r.distributorId || String(r.distributorId.superDistributorId || '') !== String(req.user._id)) {
+      return res.status(404).json({ error: 'retailer not found' });
+    }
+    if (name !== undefined) r.name = name;
+    if (phone !== undefined) r.phone = phone;
+    if (address !== undefined) r.address = address;
+    if (typeof active === 'boolean') r.active = active;
+    if (sortOrder !== undefined) r.sortOrder = Number(sortOrder) || 0;
+    if (password) r.passwordHash = await bcrypt.hash(String(password), 10);
+    await r.save();
+    res.json(r);
+  } catch (err) {
+    if (err.code === 11000) return res.status(409).json({ error: 'duplicate key' });
+    res.status(500).json({ error: 'Failed to update retailer' });
   }
 });
 
@@ -520,7 +643,7 @@ app.patch('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
     if (name) user.name = name;
     if (email) user.email = email;
     if (role) {
-       if (!['admin', 'distributor', 'retailer', 'staff'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+       if (!['admin', 'distributor', 'retailer', 'staff', 'super_distributor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
        user.role = role;
     }
     if (typeof active === 'boolean') user.active = active;
@@ -689,17 +812,82 @@ app.delete('/api/users/:id', auth, requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/sd/distributors/:id/accounts', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    const tx = await DistributorTransaction.find({ superDistributorId: req.user._id, distributorId: d._id }).sort({ createdAt: -1 });
+    const balance = tx.reduce((sum, t) => {
+      if (t.type === 'stock_out' || t.type === 'adjustment') return sum + Number(t.amount || 0);
+      return sum - Number(t.amount || 0);
+    }, 0);
+    res.json({ balance, transactions: tx });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load distributor account' });
+  }
+});
+
+app.get('/api/sd/accounts/summary', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const dists = await User.find({ role: 'distributor', superDistributorId: req.user._id }).select('name email phone active');
+    const ids = dists.map(d => d._id);
+    const tx = await DistributorTransaction.find({ superDistributorId: req.user._id, distributorId: { $in: ids } });
+    const map = {};
+    tx.forEach(t => {
+      const key = String(t.distributorId);
+      if (!map[key]) map[key] = 0;
+      if (t.type === 'stock_out' || t.type === 'adjustment') map[key] += Number(t.amount || 0);
+      else map[key] -= Number(t.amount || 0);
+    });
+    const data = dists.map(d => ({
+      distributorId: d._id,
+      name: d.name,
+      email: d.email,
+      phone: d.phone || null,
+      active: !!d.active,
+      balance: map[String(d._id)] || 0,
+    }));
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load accounts summary' });
+  }
+});
+
+app.post('/api/sd/distributors/:id/accounts/payments', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, amount, note } = req.body;
+    if (!['payment_cash', 'payment_online', 'adjustment', 'stock_out'].includes(type)) return res.status(400).json({ error: 'invalid type' });
+    const value = Number(amount);
+    if (!value || value <= 0) return res.status(400).json({ error: 'amount must be positive' });
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    const doc = await DistributorTransaction.create({
+      superDistributorId: req.user._id,
+      distributorId: d._id,
+      type,
+      amount: value,
+      note,
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to record payment' });
+  }
+});
+
 app.get('/api/admin/stats', auth, requireAdmin, async (_req, res) => {
   try {
     const total = await User.countDocuments({});
     const distributors = await User.countDocuments({ role: 'distributor' });
+    const superDistributors = await User.countDocuments({ role: 'super_distributor' });
     const retailers = await User.countDocuments({ role: 'retailer' });
     const admins = await User.countDocuments({ role: 'admin' });
     const active = await User.countDocuments({ active: true });
     const inactive = await User.countDocuments({ active: false });
     const recent = await User.find({}).sort({ createdAt: -1 }).limit(10).select('name email role active createdAt');
     const products = await Product.countDocuments({});
-    res.json({ total, distributors, retailers, admins, active, inactive, recent, products });
+    res.json({ total, distributors, superDistributors, retailers, admins, active, inactive, recent, products });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load stats' });
   }
@@ -1062,6 +1250,39 @@ app.get('/api/admin/distributors/:id/rates', auth, requireAdmin, async (req, res
   }
 });
 
+app.get('/api/sd/distributors/:id/rates', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    const items = await Rate.find({ distributorId: d._id }).sort({ updatedAt: -1 });
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list distributor rates' });
+  }
+});
+
+app.post('/api/sd/distributors/:id/rates', auth, requireSuperDistributor, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { productId, price } = req.body;
+    if (!productId || typeof price !== 'number') return res.status(400).json({ error: 'productId and price required' });
+    const d = await User.findOne({ _id: id, role: 'distributor', superDistributorId: req.user._id });
+    if (!d) return res.status(404).json({ error: 'distributor not found' });
+    const pid = new mongoose.Types.ObjectId(String(productId));
+    const existing = await Rate.findOne({ productId: pid, distributorId: d._id });
+    if (existing) {
+      existing.price = price;
+      await existing.save();
+      return res.json(existing);
+    }
+    const created = await Rate.create({ productId: pid, distributorId: d._id, price });
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to set distributor rate' });
+  }
+});
+
 app.post('/api/admin/distributors/:id/rates', auth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1264,6 +1485,7 @@ app.post('/api/my/products', auth, requireDistributor, async (req, res) => {
 app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`PATCH /api/my/products/${id} by ${req.user.name} (${req.user._id})`);
     let { unit, price, nameEnglish, baseName, variantName, variantGroup } = req.body;
     const pid = new mongoose.Types.ObjectId(String(id));
     const custom = await DistProduct.findOne({ _id: pid, distributorId: req.user._id });
@@ -1283,8 +1505,12 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
                 );
                 return res.json({ _id: globalProd._id, price: newPrice, source: 'global' });
             }
+            // 400 instead of 404 to avoid frontend confusion, though 404 is technically correct if not found
+            // But if it is global and price not sent, maybe they tried to edit something else?
+            console.log(`Global product ${pid} found, but no price provided for update.`);
             return res.status(400).json({ error: 'For global products, only price can be updated via this endpoint' });
         }
+        console.log(`Product ${pid} not found in DistProduct or Product`);
         return res.status(404).json({ error: 'product not found' });
     }
     
@@ -1293,7 +1519,8 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
       const newUnitId = unit ? String(unit) : null;
       const oldUnitId = custom.unit ? String(custom.unit) : null;
       if (newUnitId !== oldUnitId) {
-        return res.status(403).json({ error: 'Unit cannot be changed once set' });
+        console.log(`Unit change attempt blocked: ${oldUnitId} -> ${newUnitId}`);
+        return res.status(400).json({ error: 'Unit cannot be changed once set' });
       }
     }
 
@@ -1323,12 +1550,16 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
       if (unit === null || unit === '') {
         update.unit = null;
       } else {
-        try { update.unit = new mongoose.Types.ObjectId(String(unit)); } catch { return res.status(400).json({ error: 'invalid unit id' }); }
+        try { update.unit = new mongoose.Types.ObjectId(String(unit)); } catch { 
+             console.log(`Invalid unit ID: ${unit}`);
+             return res.status(400).json({ error: 'invalid unit id' }); 
+        }
       }
     }
     const p = await DistProduct.findByIdAndUpdate(custom._id, update, { new: true });
     res.json({ _id: p._id, nameEnglish: p.nameEnglish, nameHindi: p.nameHindi, active: p.active, unit: p.unit, price: p.price, baseName: p.baseName, variantName: p.variantName, variantGroup: p.variantGroup, source: 'custom' });
   } catch (err) {
+    console.error(`PATCH products failed:`, err);
     res.status(500).json({ error: 'Failed to update my product' });
   }
 });
@@ -1899,16 +2130,38 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
       .populate('createdByStaffId', 'name')
       .populate('supplierId', 'name')
       .populate('retailerId', 'name sortOrder')
-      .populate({
-        path: 'productId',
-        select: 'nameEnglish nameHindi baseName variantName variantGroup unit price',
-        populate: {
-          path: 'unit',
-          populate: { path: 'firstUnit secondUnit' }
-        }
-      })
       .sort({ createdAt: -1 })
       .lean();
+
+    // Manually populate productId to handle both Product and DistProduct
+    const pIds = [...new Set(items.map(i => i.productId && i.productId.toString()).filter(id => id))];
+    
+    if (pIds.length > 0) {
+        const products = await Product.find({ _id: { $in: pIds } })
+            .select('nameEnglish nameHindi baseName variantName variantGroup unit price')
+            .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } })
+            .lean();
+            
+        const distProducts = await DistProduct.find({ _id: { $in: pIds }, distributorId: filter.distributorId || ctx.distributorId })
+            .select('nameEnglish nameHindi unit price')
+            .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } })
+            .lean();
+
+        const pMap = {};
+        products.forEach(p => pMap[p._id.toString()] = p);
+        distProducts.forEach(p => pMap[p._id.toString()] = p);
+
+        for (const item of items) {
+            if (item.productId) {
+                const pidStr = item.productId.toString();
+                if (pMap[pidStr]) {
+                    item.productId = pMap[pidStr];
+                }
+                // If not found in map, leave as ID (better than null)
+            }
+        }
+    }
+
     console.log('Found stock moves:', items.length);
     res.json(items);
   } catch (err) {
@@ -2308,11 +2561,18 @@ app.post('/api/my/stock-in', auth, requireDistributorOrStaff('stock_in'), async 
   try {
     const { distributorId, staffId } = getContext(req);
     const { productId, quantity, note, supplierId, createdAt } = req.body;
+    
+    console.log(`STOCK-IN: User ${req.user.name} (${req.user._id}) Dist ${distributorId} Prod ${productId} Qty ${quantity}`);
+
     if (!productId || typeof quantity !== 'number') return res.status(400).json({ error: 'productId and quantity required' });
     if (quantity <= 0) return res.status(400).json({ error: 'quantity must be > 0' });
     const pid = new mongoose.Types.ObjectId(String(productId));
-    const prod = await Product.findById(pid);
-    if (!prod) return res.status(404).json({ error: 'product not found' });
+    let prod = await Product.findById(pid);
+    if (!prod) prod = await DistProduct.findOne({ _id: pid, distributorId });
+    if (!prod) {
+        console.log(`STOCK-IN ERROR: Product ${pid} not found in Product or DistProduct for dist ${distributorId}`);
+        return res.status(404).json({ error: 'product not found' });
+    }
     
     let sid = null;
     if (supplierId) {
@@ -2340,6 +2600,8 @@ app.post('/api/my/stock-in', auth, requireDistributorOrStaff('stock_in'), async 
       const gr = await GlobalRate.findOne({ productId: pid });
       if(gr) price = gr.price;
     }
+
+    if (price === 0 && prod.price) price = prod.price;
 
     await StockMove.create({
       distributorId,
@@ -2434,12 +2696,11 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
         const qty = Number(item.quantity);
         if (qty <= 0) continue;
 
-        const prod = await Product.findById(pid);
-        if (!prod) continue;
-
         // Calculate Price FIRST
         let pObj = await Product.findById(pid).populate('unit');
-        if(!pObj) pObj = await DistProduct.findById(pid).populate('unit');
+        if(!pObj) pObj = await DistProduct.findOne({ _id: pid, distributorId }).populate('unit');
+        
+        if (!pObj) continue;
 
         let price = 0;
         const rr = await RetailerRate.findOne({ distributorId, retailerId: rid, productId: pid });
@@ -2460,6 +2721,8 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
             if(gr) price = gr.price;
           }
         }
+        
+        if (price === 0 && pObj.price) price = pObj.price;
 
         // Inventory update (allow negative)
         await Inventory.updateOne(
@@ -2533,18 +2796,28 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
 });
 
 // Record stock wastage (OUT without retailer/supplier, no financials)
-app.post('/api/my/stock-wastage', auth, requireDistributorOrStaff('stock_out'), async (req, res) => {
-  try {
-    const { distributorId, staffId } = getContext(req);
-    const { items, note, createdAt } = req.body;
-    if (!items || !items.length) return res.status(400).json({ error: 'items required' });
-    const date = createdAt ? new Date(createdAt) : new Date();
-    let created = 0;
-    for (const item of items) {
-      const pid = new mongoose.Types.ObjectId(String(item.productId));
-      const qty = Number(item.quantity);
-      if (!pid || !qty || qty <= 0) continue;
-      await Inventory.updateOne(
+    app.post('/api/my/stock-wastage', auth, requireDistributorOrStaff('stock_out'), async (req, res) => {
+      try {
+        const { distributorId, staffId } = getContext(req);
+        const { items, note, createdAt } = req.body;
+        if (!items || !items.length) return res.status(400).json({ error: 'items required' });
+        const date = createdAt ? new Date(createdAt) : new Date();
+        let created = 0;
+        for (const item of items) {
+          const pid = new mongoose.Types.ObjectId(String(item.productId));
+          const qty = Number(item.quantity);
+          if (!pid || !qty || qty <= 0) continue;
+          
+          // Check Product or DistProduct
+          let exists = await Product.exists({ _id: pid });
+          if (!exists) exists = await DistProduct.exists({ _id: pid, distributorId });
+          
+          if (!exists) {
+              console.log(`WASTAGE ERROR: Product ${pid} not found for dist ${distributorId}`);
+              continue;
+          }
+
+          await Inventory.updateOne(
         { distributorId, productId: pid },
         { $inc: { quantity: -qty } },
         { upsert: true }
@@ -2612,6 +2885,15 @@ app.post('/api/my/stock-out-supplier', auth, requireDistributorOrStaff('stock_in
       const pid = new mongoose.Types.ObjectId(String(item.productId));
       const qty = Number(item.quantity);
       if (!pid || isNaN(qty) || qty < 0) continue;
+
+      // Validate Product Existence
+      let exists = await Product.exists({ _id: pid });
+      if (!exists) exists = await DistProduct.exists({ _id: pid, distributorId });
+      
+      if (!exists) {
+          console.log(`STOCK-OUT-SUPPLIER ERROR: Product ${pid} not found for dist ${distributorId}`);
+          continue;
+      }
 
       const match = {
         distributorId,
@@ -2737,12 +3019,14 @@ app.post('/api/my/recompute-order', auth, requireDistributorOrStaff(null), async
     const start = new Date(d); start.setUTCHours(0,0,0,0);
     const end = new Date(d); end.setUTCHours(23,59,59,999);
 
-    const moves = await StockMove.find({ distributorId, retailerId: rid, type: 'OUT', createdAt: { $gte: start, $lte: end } }).populate({ path: 'productId', populate: { path: 'unit' } });
+    const moves = await StockMove.find({ distributorId, retailerId: rid, type: 'OUT', createdAt: { $gte: start, $lte: end } });
     const byProd = new Map();
     for (const m of moves) {
-      const pid = m.productId?._id || m.productId;
+      const pid = m.productId;
+      if (!pid) continue;
+      const pidStr = pid.toString();
       const qty = Number(m.quantity)||0;
-      byProd.set(String(pid), (byProd.get(String(pid))||0) + qty);
+      byProd.set(pidStr, (byProd.get(pidStr)||0) + qty);
     }
     const items = [];
     let grandTotal = 0;
