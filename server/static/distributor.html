@@ -453,13 +453,14 @@
         <div class="row g-3 animate__animated animate__fadeIn">
           <div class="col-12">
             <div class="card p-3 shadow-sm border-0">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="fw-bold">Stock Out</div>
+              <div class="d-flex justify-content-end align-items-center mb-2">
                 <button class="btn btn-outline-secondary btn-sm" onclick="renderStockOut()"><i class="bi bi-arrow-repeat"></i></button>
               </div>
-              <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded">
-                <div class="flex-grow-1">
-                  <label class="form-label mb-0 small fw-bold">Retailer</label>
+              <div class="row g-2 mb-3 bg-light p-2 rounded align-items-center">
+                <div class="col-6">
+                  <input type="date" id="stockOutDate" class="form-control form-control-sm">
+                </div>
+                <div class="col-6">
                   <select id="stockOutRetailerSel" class="form-select form-select-sm"></select>
                 </div>
               </div>
@@ -475,26 +476,36 @@
                   <tbody id="stockOutRows"></tbody>
                 </table>
               </div>
-              <div class="d-flex justify-content-end mt-2">
-                <div class="small text-muted me-2">Subtotal</div>
-                <div id="stockOutSubtotal" class="fw-bold">₹0</div>
+              <div class="d-flex justify-content-between align-items-center mt-2 border-top pt-2">
+                <div>
+                   <div class="small text-muted">Last Balance</div>
+                   <div class="fw-bold fs-5">₹<span id="stockOutCurBalance">0</span></div>
+                </div>
+                <div class="text-end">
+                   <div class="small text-muted">Subtotal</div>
+                   <div id="stockOutSubtotal" class="fw-bold fs-5">₹0</div>
+                </div>
               </div>
               <div class="row g-2 mt-2">
-                <div class="col-12 col-md-4">
-                  <label class="form-label mb-0 small text-muted">Balance</label>
-                  <div class="fw-bold">₹<span id="stockOutCurBalance">0</span></div>
-                </div>
-                <div class="col-6 col-md-4">
+                <div class="col-6">
                   <label class="form-label mb-0 small">Cash</label>
                   <input id="stockOutCash" type="number" class="form-control form-control-sm" min="0" value="0">
                 </div>
-                <div class="col-6 col-md-4">
+                <div class="col-6">
                   <label class="form-label mb-0 small">Online</label>
                   <input id="stockOutOnline" type="number" class="form-control form-control-sm" min="0" value="0">
                 </div>
-                <div class="col-12 col-md-4">
-                  <label class="form-label mb-0 small text-muted">Receivable</label>
-                  <div id="stockOutReceivable" class="fw-bold">₹0</div>
+                <div class="col-6">
+                   <div class="bg-light p-2 rounded border h-100 text-center">
+                      <div class="fw-bold small text-muted">Closing (Date)</div>
+                      <div id="stockOutReceivable" class="fw-bold fs-5">₹0</div>
+                   </div>
+                </div>
+                <div class="col-6">
+                   <div class="bg-white p-2 rounded border h-100 text-center">
+                      <div class="fw-bold small text-muted">Current O/S</div>
+                      <div id="stockOutCurrentTotal" class="fw-bold fs-5 text-primary">₹0</div>
+                   </div>
                 </div>
               </div>
               <div id="stockOutBalances" class="mt-2 small text-muted"></div>
@@ -848,6 +859,10 @@
                    <label class="form-check-label" for="permReports">Reports</label>
                  </div>
                  <div class="form-check">
+                   <input class="form-check-input staff-perm" type="checkbox" value="allow_back_date" id="permAllowBackDate">
+                   <label class="form-check-label" for="permAllowBackDate">Allow Back Date Entries</label>
+                 </div>
+                 <div class="form-check">
                    <input class="form-check-input staff-perm" type="checkbox" value="staff" id="permStaff">
                    <label class="form-check-label" for="permStaff">Staff</label>
                  </div>
@@ -977,7 +992,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <div id="notifyArea" class="position-fixed top-0 end-0 p-3" style="z-index: 1080;"></div>
-  <script src="/ui/app.js?v=1.0.11"></script>
+  <script src="/ui/app.js?v=1.0.12"></script>
   <script src="/ui/staff_logic.js?v=2"></script>
   <script>
     // Failsafe: if app.js didn't init properly, try manually

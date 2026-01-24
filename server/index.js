@@ -272,6 +272,7 @@ async function auth(req, res, next) {
         return res.status(401).json({ error: 'unauthorized' });
     }
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
+    console.log('Auth payload:', payload);
     const user = await User.findById(payload.sub);
     if (!user) {
         console.log('Auth failed: User not found for sub', payload.sub);
@@ -340,7 +341,20 @@ app.post('/api/my/staff', auth, requireDistributor, async (req, res) => {
     });
     res.status(201).json(s);
   } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ error: 'Phone already exists' });
+    if (err.code === 11000) {
+        const field = Object.keys(err.keyPattern || {})[0] || 'field';
+        if (field === 'phone' || err.message.includes('phone')) {
+             try {
+                 const existing = await User.findOne({ phone: req.body.phone });
+                 if(existing) {
+                     return res.status(400).json({ error: `Phone already exists (Name: ${existing.name}, Role: ${existing.role}, Active: ${existing.active})` });
+                 }
+             } catch(e) {}
+             return res.status(400).json({ error: `Phone ${req.body.phone} already exists (User not found in lookup)` });
+        }
+        // Fallback for other duplicates (like email if somehow triggered)
+        return res.status(400).json({ error: `Duplicate ${field} already exists` });
+    }
     res.status(500).json({ error: 'Failed to create staff' });
   }
 });
@@ -1390,7 +1404,7 @@ app.get('/api/my/products', auth, requireDistributorOrStaff(null), async (req, r
          path: 'unit',
          populate: { path: 'firstUnit secondUnit' }
       });
-    const custom = await DistProduct.find({ distributorId }).sort({ createdAt: -1 })
+    const custom = await DistProduct.find({ distributorId, active: { $ne: false } }).sort({ createdAt: -1 })
       .populate({
          path: 'unit',
          populate: { path: 'firstUnit secondUnit' }
@@ -1486,7 +1500,8 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
   try {
     const { id } = req.params;
     console.log(`PATCH /api/my/products/${id} by ${req.user.name} (${req.user._id})`);
-    let { unit, price, nameEnglish, baseName, variantName, variantGroup } = req.body;
+    console.log('Payload:', req.body);
+    let { unit, price, nameEnglish, nameHindi, baseName, variantName, variantGroup } = req.body;
     const pid = new mongoose.Types.ObjectId(String(id));
     const custom = await DistProduct.findOne({ _id: pid, distributorId: req.user._id });
     
@@ -1494,6 +1509,181 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
         // Check if it is a global product
         const globalProd = await Product.findById(pid);
         if (globalProd) {
+            // Check if user is trying to update name/base/variant (Make Local)
+            const isNameUpdate = nameEnglish !== undefined || nameHindi !== undefined || baseName !== undefined || variantName !== undefined || variantGroup !== undefined;
+            
+            if (isNameUpdate) {
+                // Check if this is a Group Rename (Base Name changed for a product in a group)
+                // We define a group as having a baseName
+                if (baseName !== undefined && globalProd.baseName && baseName !== globalProd.baseName) {
+                    console.log(`Group Rename detected for Global Product: ${globalProd.baseName} -> ${baseName}`);
+                    
+                    // 1. Migrate ALL Global Products in this group
+                    const groupGlobals = await Product.find({ baseName: globalProd.baseName });
+                    let thisNewCustom = null;
+
+                    for (const gp of groupGlobals) {
+                         // Check if already hidden/converted
+                         const isHidden = await DistProductHide.findOne({ distributorId: req.user._id, productId: gp._id });
+                         if (!isHidden) {
+                             // Calculate Price
+                             let gpPrice = gp.price || 0;
+                             const rate = await Rate.findOne({ distributorId: req.user._id, productId: gp._id });
+                             if (rate) gpPrice = rate.price;
+                             else {
+                                 const gr = await GlobalRate.findOne({ productId: gp._id });
+                                 if (gr) gpPrice = gr.price;
+                             }
+
+                             // New Name Construction
+                             // If this is the target product (pid), use provided values where applicable
+                             // But wait, user provided 'variantName' might apply to THIS product only.
+                             // 'baseName' applies to ALL.
+                             // 'nameHindi' applies to ALL (usually group name in Hindi).
+                             
+                             let targetBase = baseName; // The new base name
+                             let targetHindi = nameHindi || gp.nameHindi; // If provided, apply to all (assuming group hindi name) - or fallback to existing
+                             let targetVariant = gp.variantName; // Keep original variant
+                             let targetGroup = variantGroup || gp.variantGroup; // Apply new group if provided
+
+                             // If this is the specific product being edited, apply specific overrides if any?
+                             // Actually, if I edit "Amul Gold 500ml", I change Base to "Amul Gold New".
+                             // I expect "Amul Gold 1L" to also become "Amul Gold New 1L".
+                             // I do NOT expect "Amul Gold 1L" to take "500ml" variant name.
+                             
+                             if (String(gp._id) === String(pid)) {
+                                 if (variantName) targetVariant = variantName;
+                             }
+
+                             let targetNameEnglish = targetBase;
+                             if (targetVariant) targetNameEnglish += ' ' + targetVariant;
+
+                             try {
+                                 const created = await DistProduct.create({
+                                     distributorId: req.user._id,
+                                     nameEnglish: targetNameEnglish,
+                                     nameHindi: targetHindi, // Simplified: apply same Hindi name to group or keep original? 
+                                                             // Usually Hindi Name is "Amul Gold" (Base) or "Amul Gold 500ml" (Full).
+                                                             // If original was Full, and we only have New Base Hindi, we might lose the variant part in Hindi.
+                                                             // But often Hindi name in database is just the group name.
+                                                             // Let's assume if nameHindi is provided, it's the new Group Hindi Name.
+                                                             // If the original Hindi name had variant info, it might be lost or we should try to preserve it?
+                                                             // For now, use provided nameHindi as Group Hindi Name if it looks like a group name.
+                                                             // If user didn't provide nameHindi, try to keep original but replace base part? Hard to do text processing.
+                                                             // Let's just use provided nameHindi if available, else original.
+                                     baseName: targetBase,
+                                     variantName: targetVariant,
+                                     variantGroup: targetGroup,
+                                     active: true,
+                                     unit: gp.unit,
+                                     price: gpPrice
+                                 });
+                                 
+                                 // Hide Global
+                                 await DistProductHide.create({ distributorId: req.user._id, productId: gp._id });
+
+                                 if (String(gp._id) === String(pid)) thisNewCustom = created;
+
+                             } catch (e) {
+                                 console.error(`Failed to migrate group product ${gp.nameEnglish}`, e);
+                             }
+                         }
+                    }
+
+                    // 2. Update existing Custom Products (that were previously part of this group)
+                    // They would have the OLD baseName.
+                    const existingCustoms = await DistProduct.find({ distributorId: req.user._id, baseName: globalProd.baseName });
+                    for (const ec of existingCustoms) {
+                        ec.baseName = baseName;
+                        if (variantGroup) ec.variantGroup = variantGroup;
+                        if (nameHindi) ec.nameHindi = nameHindi; // Apply group hindi name
+                        // Reconstruct English Name
+                        ec.nameEnglish = ec.baseName;
+                        if (ec.variantName) ec.nameEnglish += ' ' + ec.variantName;
+                        await ec.save();
+                    }
+
+                    if (thisNewCustom) {
+                        return res.json({ 
+                            ...thisNewCustom.toObject(), 
+                            source: 'custom'
+                        });
+                    }
+                    // If current product was already hidden/converted (race condition?), find it
+                    const found = await DistProduct.findOne({ distributorId: req.user._id, baseName: baseName, variantName: globalProd.variantName });
+                    if (found) return res.json({ ...found.toObject(), source: 'custom' });
+                    
+                    return res.status(500).json({ error: 'Migration failed to produce target product' });
+                }
+
+                console.log(`Converting global product ${pid} to local for ${req.user.name}`);
+                
+                let newName = nameEnglish || globalProd.nameEnglish;
+                let newHindi = nameHindi || globalProd.nameHindi || newName;
+                let newBase = baseName !== undefined ? baseName : globalProd.baseName;
+                let newVar = variantName !== undefined ? variantName : globalProd.variantName;
+                let newGroup = variantGroup !== undefined ? variantGroup : globalProd.variantGroup;
+                
+                // If base/variant updated but nameEnglish not provided, reconstruct
+                if (!nameEnglish && (baseName !== undefined || variantName !== undefined)) {
+                    if (newBase) {
+                        newName = newBase;
+                        if (newVar) newName += ' ' + newVar;
+                    }
+                }
+
+                // Price: Use provided price OR existing Rate OR global default
+                let finalPrice = 0;
+                if (price !== undefined) {
+                    finalPrice = Number(price) || 0;
+                } else {
+                    // Fetch existing Rate
+                    const rate = await Rate.findOne({ distributorId: req.user._id, productId: pid });
+                    finalPrice = rate ? rate.price : (globalProd.price || 0);
+                    if (!rate) {
+                         const gr = await GlobalRate.findOne({ productId: pid });
+                         if (gr) finalPrice = gr.price;
+                    }
+                }
+
+                try {
+                    const newCustom = await DistProduct.create({
+                        distributorId: req.user._id,
+                        nameEnglish: newName,
+                        nameHindi: newHindi, 
+                        baseName: newBase,
+                        variantName: newVar,
+                        variantGroup: newGroup,
+                        active: true,
+                        unit: globalProd.unit,
+                        price: finalPrice
+                    });
+
+                    // Hide global
+                    await DistProductHide.updateOne(
+                        { distributorId: req.user._id, productId: pid },
+                        { $set: { distributorId: req.user._id, productId: pid } },
+                        { upsert: true }
+                    );
+                    
+                    return res.json({ 
+                        _id: newCustom._id, 
+                        nameEnglish: newCustom.nameEnglish, 
+                        nameHindi: newCustom.nameHindi, 
+                        active: newCustom.active, 
+                        unit: newCustom.unit, 
+                        price: newCustom.price, 
+                        baseName: newCustom.baseName, 
+                        variantName: newCustom.variantName, 
+                        variantGroup: newCustom.variantGroup, 
+                        source: 'custom'
+                    });
+                } catch (e) {
+                    if (e.code === 11000) return res.status(409).json({ error: 'Product name already exists in your list' });
+                    throw e;
+                }
+            }
+
             // It's a global product. Distributor can only update PRICE (stored in Rate)
             // or maybe active (hide/unhide - handled by other endpoint, but we can support it here too if needed, but stick to price for now)
             if (price !== undefined) {
@@ -1507,8 +1697,8 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
             }
             // 400 instead of 404 to avoid frontend confusion, though 404 is technically correct if not found
             // But if it is global and price not sent, maybe they tried to edit something else?
-            console.log(`Global product ${pid} found, but no price provided for update.`);
-            return res.status(400).json({ error: 'For global products, only price can be updated via this endpoint' });
+            console.log(`Global product ${pid} found, but no price provided for update. Payload keys: ${Object.keys(req.body).join(',')}`);
+            return res.status(400).json({ error: `For global products, only price can be updated via this endpoint. Received: ${Object.keys(req.body).join(', ')}` });
         }
         console.log(`Product ${pid} not found in DistProduct or Product`);
         return res.status(404).json({ error: 'product not found' });
@@ -1524,21 +1714,86 @@ app.patch('/api/my/products/:id', auth, requireDistributor, async (req, res) => 
       }
     }
 
+    // Check for Group Rename on Custom Product
+    if (baseName !== undefined && custom.baseName && baseName !== custom.baseName) {
+         console.log(`Group Rename detected for Custom Product: ${custom.baseName} -> ${baseName}`);
+         
+         // 1. Update ALL Custom Products in this group (including this one)
+         const groupCustoms = await DistProduct.find({ distributorId: req.user._id, baseName: custom.baseName });
+         
+         for (const c of groupCustoms) {
+             c.baseName = baseName;
+             if (variantGroup) c.variantGroup = variantGroup;
+             if (nameHindi) c.nameHindi = nameHindi;
+             
+             // Reconstruct nameEnglish
+             let vName = c.variantName;
+             if (String(c._id) === String(pid) && variantName !== undefined) {
+                 vName = variantName;
+                 c.variantName = vName;
+             }
+             
+             c.nameEnglish = c.baseName;
+             if (vName) c.nameEnglish += ' ' + vName;
+             
+             await c.save();
+         }
+         
+         // 2. Adopt any UNCONVERTED Global Products from the old group
+         const globalStragglers = await Product.find({ baseName: custom.baseName });
+         for (const gp of globalStragglers) {
+             const isHidden = await DistProductHide.findOne({ distributorId: req.user._id, productId: gp._id });
+             if (!isHidden) {
+                 let gpPrice = gp.price || 0;
+                 const rate = await Rate.findOne({ distributorId: req.user._id, productId: gp._id });
+                 if (rate) gpPrice = rate.price;
+                 else {
+                     const gr = await GlobalRate.findOne({ productId: gp._id });
+                     if (gr) gpPrice = gr.price;
+                 }
+
+                 let targetName = baseName;
+                 if (gp.variantName) targetName += ' ' + gp.variantName;
+                 
+                 await DistProduct.create({
+                     distributorId: req.user._id,
+                     nameEnglish: targetName,
+                     nameHindi: nameHindi || gp.nameHindi || targetName,
+                     baseName: baseName,
+                     variantName: gp.variantName,
+                     variantGroup: variantGroup || gp.variantGroup,
+                     active: true,
+                     unit: gp.unit,
+                     price: gpPrice
+                 });
+                 
+                 await DistProductHide.create({ distributorId: req.user._id, productId: gp._id });
+             }
+         }
+         
+         const updated = await DistProduct.findById(pid);
+         return res.json({ ...updated.toObject(), source: 'custom' });
+    }
+
     const update = {};
     if (price !== undefined) update.price = Number(price) || 0;
     
     // Handle name updates
     if (nameEnglish !== undefined) {
          update.nameEnglish = nameEnglish;
-         update.nameHindi = nameEnglish;
-    } else if (baseName !== undefined || variantName !== undefined) {
+         if (nameHindi === undefined) update.nameHindi = nameEnglish;
+    }
+    
+    if (nameHindi !== undefined) update.nameHindi = nameHindi;
+
+    if (nameEnglish === undefined && (baseName !== undefined || variantName !== undefined)) {
          // If base/variant changed but nameEnglish not provided, try to reconstruct
          const newBase = baseName !== undefined ? baseName : custom.baseName;
          const newVar = variantName !== undefined ? variantName : custom.variantName;
          if (newBase) {
             update.nameEnglish = newBase;
             if (newVar) update.nameEnglish += ' ' + newVar;
-            update.nameHindi = update.nameEnglish;
+            if (nameHindi === undefined) update.nameHindi = update.nameEnglish;
          }
     }
 
@@ -1570,7 +1825,8 @@ app.delete('/api/my/products/:id', auth, requireDistributor, async (req, res) =>
     const pid = new mongoose.Types.ObjectId(String(id));
     const custom = await DistProduct.findOne({ _id: pid, distributorId: req.user._id });
     if (custom) {
-      await DistProduct.deleteOne({ _id: custom._id });
+      custom.active = false;
+      await custom.save();
       return res.json({ ok: true, deleted: 'custom' });
     }
     const global = await Product.findById(pid);
@@ -1661,18 +1917,40 @@ app.get('/api/orders/:id', auth, requireDistributorOrStaff(null), async (req, re
     const { distributorId } = getContext(req);
     const query = { _id: id };
     if (distributorId) query.distributorId = distributorId;
-    const order = await Order.findOne(query)
-      .populate({
-        path: 'items.productId',
-        select: 'nameEnglish nameHindi unit price',
-        populate: {
-          path: 'unit',
-          populate: { path: 'firstUnit secondUnit' }
-        }
-      })
-      .populate('retailerId', 'name sortOrder');
+    
+    // Fetch order without populating items.productId initially to preserve IDs
+    const order = await Order.findOne(query).populate('retailerId', 'name sortOrder');
     if (!order) return res.status(404).json({ error: 'order not found' });
-    res.json(order);
+
+    // Manually populate items to handle both Product and DistProduct
+    const populatedItems = [];
+    for(const item of order.items) {
+       let p = await Product.findById(item.productId)
+         .select('nameEnglish nameHindi unit price')
+         .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } });
+       
+       if(!p) {
+          p = await DistProduct.findById(item.productId)
+            .select('nameEnglish nameHindi unit price')
+            .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } });
+       }
+       
+       const itemObj = item.toObject();
+       if(p) {
+         itemObj.productId = {
+            _id: p._id,
+            nameEnglish: p.nameEnglish,
+            nameHindi: p.nameHindi,
+            unit: p.unit,
+            price: p.price
+         };
+       }
+       populatedItems.push(itemObj);
+    }
+
+    const orderObj = order.toObject();
+    orderObj.items = populatedItems;
+    res.json(orderObj);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch order' });
   }
@@ -2021,6 +2299,54 @@ app.get('/api/my/retailers', auth, requireDistributorOrStaff(null), async (req, 
   }
 });
 
+app.get('/api/my/retailers/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    const { id } = req.params;
+    const retailer = await User.findOne({ _id: id, role: 'retailer', distributorId });
+    if (!retailer) return res.status(404).json({ error: 'Retailer not found' });
+    res.json(retailer);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get retailer' });
+  }
+});
+
+app.get('/api/my/retailers/:id/balance-at-date', auth, requireDistributorOrStaff(null), async (req, res) => {
+  try {
+    const { distributorId } = getContext(req);
+    const { id } = req.params;
+    const { date } = req.query;
+
+    if (!date) return res.status(400).json({ error: 'Date is required' });
+
+    const retailer = await User.findOne({ _id: id, role: 'retailer', distributorId });
+    if (!retailer) return res.status(404).json({ error: 'Retailer not found' });
+
+    const fromDate = new Date(date);
+    if (isNaN(fromDate.getTime())) return res.status(400).json({ error: 'Invalid date' });
+
+    // Find all transactions on or after this date
+    const txs = await Transaction.find({ 
+        retailerId: id, 
+        createdAt: { $gte: fromDate } 
+    });
+
+    let futureChange = 0;
+    txs.forEach(t => {
+        if (t.type === 'order') futureChange += t.amount;
+        else if (t.type === 'payment_cash' || t.type === 'payment_online') futureChange -= t.amount;
+    });
+
+    const currentBalance = Number(retailer.currentBalance) || 0;
+    const openingBalance = currentBalance - futureChange;
+
+    res.json({ openingBalance, currentBalance, futureChange });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to calculate balance' });
+  }
+});
+
 app.put('/api/my/retailers/:id', auth, requireDistributorOrStaff('add_retailer'), async (req, res) => {
   try {
     const { distributorId } = getContext(req);
@@ -2173,7 +2499,7 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
 app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
     const { id } = req.params;
-    const { quantity, note } = req.body;
+    const { quantity, note, date } = req.body;
     const { distributorId } = getContext(req);
 
     const move = await StockMove.findById(id);
@@ -2184,6 +2510,17 @@ app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async 
        const p = req.user.permissions || [];
        if (move.type === 'IN' && !p.includes('stock_in')) return res.status(403).json({ error: 'Permission denied' });
        if (move.type === 'OUT' && !p.includes('stock_out')) return res.status(403).json({ error: 'Permission denied' });
+       
+       // Permission Check for Back Date Update
+       if (date) {
+            const today = new Date();
+            const d = new Date(date);
+            if (d.toDateString() !== today.toDateString()) {
+                 if (!p.includes('allow_back_date')) {
+                     return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+                 }
+            }
+       }
     }
 
     const newQty = Number(quantity);
@@ -2209,6 +2546,7 @@ app.put('/api/my/stock-moves/:id', auth, requireDistributorOrStaff(null), async 
 
     move.quantity = newQty;
     if (note !== undefined) move.note = note;
+    if (date) move.createdAt = new Date(date);
     await move.save();
 
     res.json(move);
@@ -2287,6 +2625,17 @@ app.put('/api/my/transactions/:id', auth, requireDistributorOrStaff(null), async
     try {
         const { distributorId } = getContext(req);
         const { amount, note, date } = req.body;
+        
+        // Permission Check for Back Date Update
+        if (date && req.user.role === 'staff') {
+            const today = new Date();
+            const d = new Date(date);
+            if (d.toDateString() !== today.toDateString()) {
+                 if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                     return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+                 }
+            }
+        }
         
         const tx = await Transaction.findOne({ _id: req.params.id, distributorId });
         if(!tx) return res.status(404).json({ error: 'Transaction not found' });
@@ -2580,6 +2929,16 @@ app.post('/api/my/stock-in', auth, requireDistributorOrStaff('stock_in'), async 
     }
     const date = createdAt ? new Date(String(createdAt)) : new Date();
 
+    // Permission Check for Back Date
+    if (createdAt && req.user.role === 'staff') {
+        const today = new Date();
+        if (date.toDateString() !== today.toDateString()) {
+             if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                 return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+             }
+        }
+    }
+
     await Inventory.updateOne(
       { distributorId, productId: pid },
       { $inc: { quantity: quantity } },
@@ -2687,6 +3046,17 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
     if (!ret) return res.status(404).json({ error: 'retailer not found' });
 
     const date = createdAt ? new Date(createdAt) : new Date();
+
+    // Permission Check for Back Date
+    if (createdAt && req.user.role === 'staff') {
+        const today = new Date();
+        if (date.toDateString() !== today.toDateString()) {
+             if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                 return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+             }
+        }
+    }
+
     const orderItems = [];
     let grandTotal = 0;
     const stockMoves = [];
@@ -2802,6 +3172,17 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
         const { items, note, createdAt } = req.body;
         if (!items || !items.length) return res.status(400).json({ error: 'items required' });
         const date = createdAt ? new Date(createdAt) : new Date();
+
+        // Permission Check for Back Date
+        if (createdAt && req.user.role === 'staff') {
+            const today = new Date();
+            if (date.toDateString() !== today.toDateString()) {
+                 if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                     return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+                 }
+            }
+        }
+
         let created = 0;
         for (const item of items) {
           const pid = new mongoose.Types.ObjectId(String(item.productId));
@@ -2848,6 +3229,21 @@ app.post('/api/my/stock-out-supplier', auth, requireDistributorOrStaff('stock_in
     const { supplierId, items, note, createdAt } = req.body;
     if (!supplierId) return res.status(400).json({ error: 'supplierId required' });
     if (!items || !items.length) return res.status(400).json({ error: 'items required' });
+    
+    // Permission Check for Back Date
+    const rawCreatedAt = createdAt;
+    let date = rawCreatedAt ? new Date(rawCreatedAt) : new Date();
+
+    if (createdAt && req.user.role === 'staff') {
+        const today = new Date();
+        const d = new Date(createdAt);
+        if (d.toDateString() !== today.toDateString()) {
+             if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                 return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+             }
+        }
+    }
+
     const sid = new mongoose.Types.ObjectId(String(supplierId));
     const sup = await Supplier.findOne({ _id: sid, distributorId });
     if (!sup) {
@@ -2858,8 +3254,8 @@ app.post('/api/my/stock-out-supplier', auth, requireDistributorOrStaff('stock_in
       }
       return res.status(404).json({ error: `supplier not found (id: ${sid})` });
     }
-    const rawCreatedAt = createdAt;
-    const date = rawCreatedAt ? new Date(rawCreatedAt) : new Date();
+    
+    // date and rawCreatedAt already defined above
     const dayKey =
       typeof rawCreatedAt === 'string' && rawCreatedAt.length >= 10
         ? rawCreatedAt.slice(0, 10)
@@ -2968,15 +3364,34 @@ app.post('/api/my/retailers', auth, requireDistributorOrStaff('add_retailer'), a
 app.post('/api/my/transactions', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
     const { distributorId, staffId } = getContext(req);
-    const { retailerId, type, amount, note } = req.body;
+    const { retailerId, type, amount, note, createdAt } = req.body;
     
-    console.log('POST /api/my/transactions params:', { distributorId, retailerId, type, amount });
+    console.log('POST /api/my/transactions params:', { distributorId, retailerId, type, amount, createdAt });
 
     if (!retailerId || !type || typeof amount !== 'number') {
       return res.status(400).json({ error: 'retailerId, type, amount required' });
     }
 
     if (amount <= 0) return res.status(400).json({ error: 'amount must be > 0' });
+
+    // Permission Check for Back Date
+    let date = createdAt ? new Date(createdAt) : new Date();
+    console.log('POST /api/my/transactions Date Logic:', { inputCreatedAt: createdAt, parsedDate: date, isBackDate: createdAt ? 'Yes' : 'No' });
+    
+    if (createdAt && req.user.role === 'staff') {
+        const today = new Date();
+        const d = new Date(createdAt);
+        // IST adjustment if needed, but simple date string check is usually enough if client sends local date
+        // However, createdAt is ISO string. 
+        // If client sends '2023-01-01', new Date() is UTC. 
+        // We'll trust client intention. If it differs from server "today", check permission.
+        // To be safe, let's use a 24h threshold or just date string match on server time.
+        if (d.toDateString() !== today.toDateString()) {
+             if (!req.user.permissions || !req.user.permissions.includes('allow_back_date')) {
+                 return res.status(403).json({ error: 'Permission denied: Back date entry not allowed' });
+             }
+        }
+    }
 
     const rid = new mongoose.Types.ObjectId(String(retailerId));
     const ret = await User.findOne({ _id: rid, role: 'retailer', distributorId });
@@ -2988,7 +3403,8 @@ app.post('/api/my/transactions', auth, requireDistributorOrStaff(null), async (r
       type,
       amount,
       note,
-      createdByStaffId: staffId
+      createdByStaffId: staffId,
+      createdAt: date
     });
     
     if (type === 'order') {

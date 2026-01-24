@@ -15,7 +15,7 @@ function uiHref(page){ const isFile = location.protocol === 'file:'; return isFi
 async function api(path, opts={}){
   // Version check
   if(!window.APP_VERSION_LOGGED) {
-      console.log('App Version: v1.0.9 - Loaded');
+      console.log('App Version: v1.0.10 - Loaded');
       window.APP_VERSION_LOGGED = true;
   }
   const headers = Object.assign({ 'Content-Type':'application/json' }, opts.headers||{});
@@ -362,6 +362,7 @@ async function renderProductsGrid(selector){
         <div>
           <div class="fw-bold">${p.nameEnglish}</div>
           <div class="small text-muted">${p.nameHindi || ''}</div>
+          ${p.variantGroup ? `<div class="badge bg-light text-dark border mt-1">Group: ${p.variantGroup}</div>` : ''}
           <div class="input-group input-group-sm mt-1" style="max-width:200px">
              <span class="input-group-text">Unit</span>
              <select class="form-select" id="p-unit-${p._id}">${unitOpts}</select>
@@ -405,12 +406,14 @@ function bindProductEditModal() {
   btn.onclick = async () => {
     const id = qs('#editProdId').value;
     const source = qs('#editProdSource').value;
+    const nameEnglish = qs('#editProdNameDisplay').value;
     const baseName = qs('#editProdBaseName').value;
     const variantName = qs('#editProdVariantName').value;
     const nameHindi = qs('#editProdNameHindi').value;
     const variantGroup = qs('#editProdVariantGroup') ? qs('#editProdVariantGroup').value : '';
 
     const payload = {
+        nameEnglish,
         nameHindi,
         baseName,
         variantName,
@@ -418,7 +421,8 @@ function bindProductEditModal() {
     };
     
     try {
-        const endpoint = source === 'custom' ? `/api/my/products/${id}` : `/api/products/${id}`;
+        const isDistributor = location.pathname.includes('distributor.html') || document.getElementById('nav-dashboard');
+        const endpoint = (source === 'custom' || isDistributor) ? `/api/my/products/${id}` : `/api/products/${id}`;
         await api(endpoint, { method: 'PATCH', body: JSON.stringify(payload) });
         
         // Hide modal
@@ -995,11 +999,12 @@ async function renderDistProductsGrid(selector){
     const displayName = isVariant && p.variantName ? p.variantName : p.nameEnglish;
     const nameDisplay = `<div class="variant-name">${displayName}</div>${p.nameHindi ? `<div class="variant-sub">${p.nameHindi}</div>` : ''}`;
     const badge = p.source === 'global' ? '<span class="badge bg-secondary rounded-pill" style="font-size:0.6rem">Global</span>' : '<span class="badge bg-info text-dark rounded-pill" style="font-size:0.6rem">Custom</span>';
+    const groupBadge = p.variantGroup ? `<span class="badge bg-light text-dark border ms-1" style="font-size:0.6rem" title="Group: ${p.variantGroup}">${p.variantGroup}</span>` : '';
 
     div.innerHTML=`
       <div class="variant-info">
         ${nameDisplay}
-        <div class="mt-1">${badge}</div>
+        <div class="mt-1">${badge}${groupBadge}</div>
       </div>
       
       <div class="variant-controls">
@@ -1015,7 +1020,8 @@ async function renderDistProductsGrid(selector){
         </div>
 
         <div class="action-btn-group">
-          <button class="btn btn-sm btn-outline-primary" data-act="save" data-id="${p._id}" data-source="${p.source}" title="Save Changes"><i class="bi bi-check-lg"></i></button>
+          <button class="btn btn-sm btn-outline-primary" data-act="save" data-id="${p._id}" data-source="${p.source}" title="Save Price/Unit"><i class="bi bi-check-lg"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" data-act="edit" data-id="${p._id}" title="Edit Name/Details"><i class="bi bi-pencil"></i></button>
           ${p.source==='custom' ? `<button class="btn btn-sm btn-outline-danger" data-act="del" data-id="${p._id}" title="Delete"><i class="bi bi-trash"></i></button>` : `<button class="btn btn-sm btn-outline-secondary" data-act="hide" data-id="${p._id}" title="Hide"><i class="bi bi-eye-slash"></i></button>`}
         </div>
       </div>
@@ -1067,6 +1073,11 @@ async function renderDistProductsGrid(selector){
     if(!act||!id) return;
     
     try{
+      if(act==='edit'){
+        const product = items.find(x => x._id === id);
+        if(product) openProductEditModal(product, product.source);
+        return;
+      }
       if(act==='unitInfo'){
         const sel = el.querySelector(`select[data-id="${id}"]`);
         const unitId = sel ? sel.value : '';
@@ -1135,7 +1146,7 @@ async function renderHiddenProducts(selector){
     const id = btn.getAttribute('data-id');
     if(act==='unhide'){
       try{
-        await api(`/api/my/products/${id}/unhide`, { method:'POST' });
+        await api(`/api/my/products/${id}/hide`, { method:'DELETE' });
         renderHiddenProducts(selector);
         renderDistProductsGrid('#distProdGrid');
       }catch(e){ alert(e.message); }
@@ -1821,14 +1832,7 @@ async function renderStockOut(initialState = null){
     let dateInput = qs('#stockOutDate');
     const rSel = qs('#stockOutRetailerSel');
     
-    // Inject Date Input if not exists
-    if (!dateInput && rSel) {
-       const div = document.createElement('div');
-       div.className = 'mb-3';
-       div.innerHTML = '<label class="form-label">Date</label><input type="date" id="stockOutDate" class="form-control">';
-       rSel.parentNode.insertBefore(div, rSel);
-       dateInput = qs('#stockOutDate');
-    }
+    // Date Input is now in HTML, no need to inject
     
     if(dateInput && !dateInput.value) {
        dateInput.value = new Date().toISOString().split('T')[0];
@@ -1842,6 +1846,7 @@ async function renderStockOut(initialState = null){
     const cashInp = qs('#stockOutCash');
     const onlineInp = qs('#stockOutOnline');
     const recvEl = qs('#stockOutReceivable');
+    const curTotalEl = qs('#stockOutCurrentTotal');
     const saveBtn = qs('#stockOutSaveBtn');
 
     let rrMap = {};
@@ -1863,13 +1868,26 @@ async function renderStockOut(initialState = null){
     };
 
     const updateBalance = () => {
-      if(!balEl || !rSel) return;
+      if(!balEl || !rSel) return 0;
       const r = retailers.find(x=>x._id === rSel.value);
-      const base = r ? (Number(r.currentBalance)||0) : 0; 
-      const delta = lastCalculatedNet - initialNet;
-      const bal = base + delta;
-      balEl.textContent = '₹'+bal.toFixed(2); 
-      balEl.className = 'fw-bold ' + (bal>0? 'text-danger':'text-success');
+      const currentDbBal = r ? (Number(r.currentBalance)||0) : 0;
+      
+      let base = 0;
+      if (r && r.dayOpeningBalance !== undefined) {
+          base = Number(r.dayOpeningBalance);
+      } else {
+          base = currentDbBal - initialNet;
+      }
+      
+      balEl.textContent = '₹'+base.toFixed(2); 
+      balEl.className = 'fw-bold ' + (base>0? 'text-danger':'text-success');
+      
+      if(curTotalEl) {
+         curTotalEl.textContent = '₹' + currentDbBal.toFixed(2);
+         curTotalEl.className = 'fw-bold fs-5 ' + (currentDbBal>0? 'text-danger':'text-success');
+      }
+      
+      return base;
     };
 
     const fillRetailers = () => {
@@ -1953,11 +1971,15 @@ async function renderStockOut(initialState = null){
       if(subtotalEl) subtotalEl.textContent = '₹' + subtotal.toFixed(2);
       const cash = Number(cashInp && cashInp.value || 0);
       const online = Number(onlineInp && onlineInp.value || 0);
-      const receivable = Math.max(0, subtotal - cash - online);
+      
+      const base = updateBalance(); // Get the static Last Balance
+      
+      // Receivable = Last Balance + Subtotal - Cash - Online
+      const receivable = base + subtotal - cash - online;
+      
       if(recvEl) recvEl.textContent = '₹' + receivable.toFixed(2);
       
       lastCalculatedNet = subtotal - cash - online;
-      updateBalance();
     };
 
     const onInput = () => computeTotalAndAmounts();
@@ -2077,6 +2099,16 @@ async function renderStockOut(initialState = null){
             return; 
         }
         
+        // Refresh Retailer Balance
+        try {
+             const balData = await api(`/api/my/retailers/${rid}/balance-at-date?date=${d}`);
+             const idx = retailers.findIndex(x => x._id === rid);
+             if(idx !== -1) {
+                 retailers[idx].dayOpeningBalance = balData.openingBalance;
+                 retailers[idx].currentBalance = balData.currentBalance;
+             }
+        } catch(e) { console.error('Failed to refresh retailer balance', e); }
+        
         try {
             const from = new Date(d); from.setHours(0,0,0,0);
             const to = new Date(d); to.setHours(23,59,59,999);
@@ -2166,6 +2198,7 @@ async function renderStockOut(initialState = null){
             computeTotalAndAmounts();
             initialNet = lastCalculatedNet;
             updateBalance();
+            computeTotalAndAmounts(); // Recalculate to ensure Receivable uses the correct Opening Balance
         } catch(e) { console.error('Error loading daily data', e); throw e; }
     };
     
@@ -2269,7 +2302,8 @@ async function renderStockOut(initialState = null){
                          } else {
                              // Update primary
                              try {
-                                await api(`/api/my/stock-moves/${existing._id}`, { method: 'PUT', body: JSON.stringify({ quantity: qty }) });
+                                const createdAt = new Date(d).toISOString();
+                                await api(`/api/my/stock-moves/${existing._id}`, { method: 'PUT', body: JSON.stringify({ quantity: qty, date: createdAt }) });
                              } catch(e) {
                                 if(e.message.includes('404') || e.message.includes('not found')){
                                     newItems.push({ productId: p._id, quantity: qty });
@@ -2310,6 +2344,8 @@ async function renderStockOut(initialState = null){
                  const isDirty = dirtyPaymentTypes.has(mapKey);
                  const existing = dailyTxnsMap[mapKey];
                  
+                 console.log(`processPay: type=${type}, val=${val}, isDirty=${isDirty}, date=${d}`);
+
                  if(!isDirty && existing){
                      // If not dirty and exists, force val to match existing so no change is detected
                      val = existing.amount;
@@ -2327,7 +2363,8 @@ async function renderStockOut(initialState = null){
                              }
                          } else {
                              try {
-                                await api(`/api/my/transactions/${existing._id}`, { method: 'PUT', body: JSON.stringify({ amount: val }) });
+                                const createdAt = new Date(d).toISOString();
+                                await api(`/api/my/transactions/${existing._id}`, { method: 'PUT', body: JSON.stringify({ amount: val, date: createdAt }) });
                              } catch(e) {
                                 if(e.message.includes('404') || e.message.includes('not found')){
                                     const createdAt = new Date(d).toISOString();
@@ -2371,7 +2408,10 @@ async function renderStockOut(initialState = null){
       });
     }
 
-  } catch(e){ console.error(e); }
+  } catch(e){ 
+    console.error(e); 
+    alert('Stock Out Page Error: ' + e.message);
+  }
 }
 
 async function loadRetailer(){
@@ -2985,6 +3025,14 @@ async function renderReport(){
     const thead = qs('#repThead');
     const tbody = qs('#repRows');
     const cnt = qs('#repCount');
+    
+    // Fetch Staff for mapping
+    let staffMap = {};
+    try {
+        const staffList = await api('/api/my/staff');
+        staffList.forEach(s => staffMap[s._id] = s.name);
+    } catch(e){}
+
     let products = [];
     if(ROLE === 'admin') products = await api('/api/products');
     else products = await api('/api/my/products?_t=' + Date.now());
@@ -3394,10 +3442,10 @@ async function renderReport(){
           runningBal = selectedRetailer.currentBalance || 0;
       }
 
-      header = ['Date','Type','Retailer','Amount'];
+      header = ['Date','Type','Retailer','Staff','Amount'];
       if(showBalance) header.push('Balance');
 
-      let html = '<tr><th>Date</th><th>Type</th><th>Retailer</th><th class="text-end">Amount</th>';
+      let html = '<tr><th>Date</th><th>Type</th><th>Retailer</th><th>Staff</th><th class="text-end">Amount</th>';
       if(showBalance) html += '<th class="text-end">Balance</th>';
       html += '</tr>';
 
@@ -3413,6 +3461,7 @@ async function renderReport(){
         const rObj = t.retailerId || {};
         const ret = rObj.name || (typeof t.retailerId === 'string' ? t.retailerId : '-');
         const amt = Number(t.amount)||0;
+        const staffName = t.createdByStaffId ? (staffMap[t.createdByStaffId] || 'Unknown') : 'Distributor';
         
         let balCell = '';
         let rowBalVal = '';
@@ -3423,7 +3472,7 @@ async function renderReport(){
             else if(['payment_cash','payment_online'].includes(ty)) runningBal += amt;
         }
 
-        const rowText = `${ds} ${ty} ${ret} ${amt}`.toLowerCase();
+        const rowText = `${ds} ${ty} ${ret} ${staffName} ${amt}`.toLowerCase();
         if(search && !rowText.includes(search)) return;
 
         if(ty === 'order') totalDebit += amt;
@@ -3436,10 +3485,10 @@ async function renderReport(){
             const refId = t.referenceId._id || t.referenceId;
             typeHtml = `<span class="badge ${badge}" style="cursor:pointer" onclick="showOrderDetails('${refId}')">${ty} <i class="bi bi-info-circle"></i></span>`;
         }
-        tr.innerHTML = `<td>${ds}</td><td>${typeHtml}</td><td>${ret}</td><td class="text-end">₹${amt.toFixed(2)}</td>${balCell}`;
+        tr.innerHTML = `<td>${ds}</td><td>${typeHtml}</td><td>${ret}</td><td>${staffName}</td><td class="text-end">₹${amt.toFixed(2)}</td>${balCell}`;
         tbody.appendChild(tr);
         
-        const rowData = [ds,ty,ret,amt.toFixed(2)];
+        const rowData = [ds,ty,ret,staffName,amt.toFixed(2)];
         if(showBalance) rowData.push(rowBalVal);
         data.push(rowData);
       }); 
@@ -3448,13 +3497,13 @@ async function renderReport(){
           const tr = document.createElement('tr');
           tr.className = 'table-light fw-bold';
           const balCol = showBalance ? '<td></td>' : '';
-          tr.innerHTML = `<td>Total</td><td></td><td></td><td class="text-end"><div class="text-danger small">Orders: ₹${totalDebit.toFixed(2)}</div><div class="text-success small">Recd: ₹${totalCredit.toFixed(2)}</div></td>${balCol}`;
+          tr.innerHTML = `<td>Total</td><td></td><td></td><td></td><td class="text-end"><div class="text-danger small">Orders: ₹${totalDebit.toFixed(2)}</div><div class="text-success small">Recd: ₹${totalCredit.toFixed(2)}</div></td>${balCol}`;
           tbody.appendChild(tr);
       }
       }
     } else if(cat === 'supplier_ledger'){
-      header = ['Date','Type','Supplier','Amount'];
-      if(thead) thead.innerHTML = '<tr><th>Date</th><th>Type</th><th>Supplier</th><th class="text-end">Amount</th></tr>';
+      header = ['Date','Type','Supplier','Staff','Amount'];
+      if(thead) thead.innerHTML = '<tr><th>Date</th><th>Type</th><th>Supplier</th><th>Staff</th><th class="text-end">Amount</th></tr>';
       
       let totalBill = 0;
       let totalPaid = 0;
@@ -3465,7 +3514,9 @@ async function renderReport(){
         const ty = t.type;
         const sup = t.supplierId && t.supplierId.name ? t.supplierId.name : (t.supplierId||'-');
         const amt = Number(t.amount)||0;
-        const rowText = `${ds} ${ty} ${sup} ${amt}`.toLowerCase();
+        const staffName = t.createdByStaffId ? (staffMap[t.createdByStaffId] || 'Unknown') : 'Distributor';
+
+        const rowText = `${ds} ${ty} ${sup} ${staffName} ${amt}`.toLowerCase();
         if(search && !rowText.includes(search)) return;
 
         if(ty === 'bill') totalBill += amt;
@@ -3473,15 +3524,15 @@ async function renderReport(){
 
         const tr = document.createElement('tr');
         const badge = ty==='bill'? 'bg-danger' : 'bg-success';
-        tr.innerHTML = `<td>${ds}</td><td><span class="badge ${badge}">${ty}</span></td><td>${sup}</td><td class="text-end">₹${amt.toFixed(2)}</td>`;
+        tr.innerHTML = `<td>${ds}</td><td><span class="badge ${badge}">${ty}</span></td><td>${sup}</td><td>${staffName}</td><td class="text-end">₹${amt.toFixed(2)}</td>`;
         tbody.appendChild(tr);
-        data.push([ds,ty,sup,amt.toFixed(2)]);
+        data.push([ds,ty,sup,staffName,amt.toFixed(2)]);
       }); 
       
       if(data.length > 0) {
           const tr = document.createElement('tr');
           tr.className = 'table-light fw-bold';
-          tr.innerHTML = `<td>Total</td><td></td><td></td><td class="text-end"><div class="text-danger small">Bills: ₹${totalBill.toFixed(2)}</div><div class="text-success small">Paid: ₹${totalPaid.toFixed(2)}</div></td>`;
+          tr.innerHTML = `<td>Total</td><td></td><td></td><td></td><td class="text-end"><div class="text-danger small">Bills: ₹${totalBill.toFixed(2)}</div><div class="text-success small">Paid: ₹${totalPaid.toFixed(2)}</div></td>`;
           tbody.appendChild(tr);
       }
       }

@@ -13,6 +13,7 @@ New-Item -ItemType Directory -Path "$TEMP_DIR/server/static" -Force | Out-Null
 # Copy files
 Write-Host "Copying files to temp..."
 Copy-Item "server/index.js" "$TEMP_DIR/server/"
+Copy-Item "server/check_admin.js" "$TEMP_DIR/server/"
 Copy-Item "server/migrate_products.js" "$TEMP_DIR/server/"
 Copy-Item "server/static/app.js" "$TEMP_DIR/server/static/"
 Copy-Item "server/static/distributor.html" "$TEMP_DIR/server/static/"
