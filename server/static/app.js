@@ -580,18 +580,33 @@ window.onpopstate = (event) => {
     // If loadDistributor or loadRetailer hasn't overridden this yet, or if they failed
     if(event.state && event.state.tab && typeof window.switchTab === 'function'){
         window.switchTab(event.state.tab, false);
+        // TRAP Logic for Dashboard/Order tabs in onpopstate
+        if (event.state.tab === 'tab-dashboard' || event.state.tab === 'tab-order') {
+             // We are AT the home tab.
+             // If this popstate event was triggered by "Back" from the SAME tab (meaning we popped an identical state),
+             // or if we just landed here from another tab.
+             // We can't easily distinguish "Back from Dashboard" vs "Back TO Dashboard".
+             // BUT, if we want to prevent "Back FROM Dashboard" (which goes to blank), we should ensure we have a forward state?
+             // Actually, simplest is: If we are on Dashboard, push the state again to keep the stack full.
+             // But doing this on every navigation to dashboard breaks "Forward" button (not an issue in app).
+             
+             // The user problem: "click back button ... blank screen".
+             // This implies the stack is emptying.
+             // So we re-push the state.
+             try { history.pushState({ tab: event.state.tab }, '', `#${event.state.tab}`); } catch(e){}
+             
+             // And if we think this was an EXIT attempt (hard to know for sure in onpopstate without tracking stack depth),
+             // we could try exitApp(). But calling exitApp() on every "Back to Dashboard" is annoying if they just came from Profile.
+             // So we only Trap here. handleBack() does the Exit.
+        }
     } else {
         // Fallback based on URL
         if(location.pathname.includes('distributor.html') && typeof window.switchTab === 'function'){
             window.switchTab('tab-dashboard', false);
             history.replaceState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
+            history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); // Extra push to buffer
         } else if(location.pathname.includes('retailer.html') && typeof window.switchTab === 'function'){
-            // Note: switchTab might be the global one (Distributor) or overwritten one (Retailer)
-            // But global switchTab doesn't handle 'tab-order'. 
-            // However, loadRetailer overrides switchTab. If we are here, loadRetailer might not have run.
-            // If loadRetailer hasn't run, switchTab is the global one, which doesn't know 'tab-order'.
-            // So we can't do much if loadRetailer hasn't run.
-            // But if it HAS run, it overwrites onpopstate too.
+            // ...
         }
     }
 };
@@ -4414,6 +4429,14 @@ async function deleteStaff() {
             window.Capacitor.Plugins.App.exitApp();
         } else if(navigator.app && navigator.app.exitApp) {
             navigator.app.exitApp();
+        } else {
+             // Fallback for browsers/webviews without exitApp support:
+             // Confirm exit, and if they cancel (or if we can't exit), PUSH STATE BACK to trap them.
+             if(confirm("Exit App?")) {
+                 window.close(); // Try window.close (often blocked but worth a shot)
+             } else {
+                 // Do nothing, they chose not to exit.
+             }
         }
     };
 
@@ -4430,6 +4453,12 @@ async function deleteStaff() {
           return; 
       }
       // On Dashboard - Exit
+      // TRAP: Push state FIRST to ensure we don't drift to blank if exitApp fails async or is just a request
+      try{ history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); }catch(e){}
+      
+      // If we have Capacitor, calling exitApp() is usually fine.
+      // But if user says "it's showing a blank screen", it means the browser back IS executing.
+      // So we pushState to counteract the "Pop" that just happened (if this was triggered by popstate).
       exitApp();
       return;
     }
@@ -4444,6 +4473,7 @@ async function deleteStaff() {
           return; 
       }
       // On Order Tab - Exit
+      try{ history.pushState({ tab: 'tab-order' }, '', '#tab-order'); }catch(e){}
       exitApp();
       return;
     }
