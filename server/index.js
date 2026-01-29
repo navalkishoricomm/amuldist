@@ -320,9 +320,10 @@ function getContext(req) {
   return { distributorId: null, staffId: null };
 }
 
-app.get('/api/my/staff', auth, requireDistributor, async (req, res) => {
+app.get('/api/my/staff', auth, requireDistributorOrStaff(null), async (req, res) => {
   try {
-    const staff = await User.find({ role: 'staff', distributorId: req.user._id }).sort({ createdAt: -1 });
+    const { distributorId } = getContext(req);
+    const staff = await User.find({ role: 'staff', distributorId }).sort({ createdAt: -1 });
     res.json(staff);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list staff' });
