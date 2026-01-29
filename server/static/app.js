@@ -580,33 +580,14 @@ window.onpopstate = (event) => {
     // If loadDistributor or loadRetailer hasn't overridden this yet, or if they failed
     if(event.state && event.state.tab && typeof window.switchTab === 'function'){
         window.switchTab(event.state.tab, false);
-        // TRAP Logic for Dashboard/Order tabs in onpopstate
-        if (event.state.tab === 'tab-dashboard' || event.state.tab === 'tab-order') {
-             // We are AT the home tab.
-             // If this popstate event was triggered by "Back" from the SAME tab (meaning we popped an identical state),
-             // or if we just landed here from another tab.
-             // We can't easily distinguish "Back from Dashboard" vs "Back TO Dashboard".
-             // BUT, if we want to prevent "Back FROM Dashboard" (which goes to blank), we should ensure we have a forward state?
-             // Actually, simplest is: If we are on Dashboard, push the state again to keep the stack full.
-             // But doing this on every navigation to dashboard breaks "Forward" button (not an issue in app).
-             
-             // The user problem: "click back button ... blank screen".
-             // This implies the stack is emptying.
-             // So we re-push the state.
-             try { history.pushState({ tab: event.state.tab }, '', `#${event.state.tab}`); } catch(e){}
-             
-             // And if we think this was an EXIT attempt (hard to know for sure in onpopstate without tracking stack depth),
-             // we could try exitApp(). But calling exitApp() on every "Back to Dashboard" is annoying if they just came from Profile.
-             // So we only Trap here. handleBack() does the Exit.
-        }
     } else {
         // Fallback based on URL
         if(location.pathname.includes('distributor.html') && typeof window.switchTab === 'function'){
             window.switchTab('tab-dashboard', false);
             history.replaceState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
-            history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); // Extra push to buffer
         } else if(location.pathname.includes('retailer.html') && typeof window.switchTab === 'function'){
-            // ...
+            window.switchTab('tab-order', false);
+            history.replaceState({ tab: 'tab-order' }, '', '#tab-order');
         }
     }
 };
@@ -627,15 +608,9 @@ async function loadDistributor(){
   window.onpopstate = (event) => {
       if(event.state && event.state.tab){
           window.switchTab(event.state.tab, false);
-          // If we are at dashboard, trap the user by pushing state again
-          // This prevents the next back button from exiting the app
-          if(event.state.tab === 'tab-dashboard'){
-              history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
-          }
       } else {
-          // If popped to initial/unknown state, force dashboard and trap
+          // If popped to initial/unknown state, force dashboard
           window.switchTab('tab-dashboard', false);
-          history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
       }
   };
   
@@ -650,7 +625,6 @@ async function loadDistributor(){
   } else {
      // Push initial state so we have something to pop
      history.replaceState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
-     history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); 
      // Ensure dashboard is active
      window.switchTab('tab-dashboard', false);
   }
@@ -2478,13 +2452,8 @@ async function loadRetailer(){
   window.onpopstate = (event) => {
       if(event.state && event.state.tab){
           window.switchTab(event.state.tab, false);
-          // Trap at order tab (home)
-          if(event.state.tab === 'tab-order'){
-              history.pushState({ tab: 'tab-order' }, '', '#tab-order');
-          }
       } else {
           window.switchTab('tab-order', false);
-          history.pushState({ tab: 'tab-order' }, '', '#tab-order');
       }
   };
 
@@ -2496,7 +2465,6 @@ async function loadRetailer(){
      window.switchTab(id, true);
   } else {
      history.replaceState({ tab: 'tab-order' }, '', '#tab-order');
-     history.pushState({ tab: 'tab-order' }, '', '#tab-order'); 
      window.switchTab('tab-order', false);
   }
 
@@ -3886,15 +3854,7 @@ else {
 
 
 
-try{
-  if(path.includes('distributor.html') || path.includes('retailer.html')){
-    history.pushState(null, '', location.href);
-    window.addEventListener('popstate', function(ev){
-      if(typeof window.handleBack === 'function') window.handleBack();
-      try{ history.pushState(null, '', location.href); }catch{}
-    });
-  }
-}catch{}
+
 
 
 
@@ -4448,7 +4408,6 @@ async function deleteStaff() {
       if (active && active.id !== 'tab-dashboard') { 
           if(typeof window.switchTab === 'function') {
               window.switchTab('tab-dashboard'); 
-              try{ history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); }catch(e){}
           }
           return; 
       }
@@ -4468,7 +4427,6 @@ async function deleteStaff() {
       if (rActive && rActive.id !== 'tab-order') { 
           if(typeof window.switchTab === 'function') {
               window.switchTab('tab-order'); 
-              try{ history.pushState({ tab: 'tab-order' }, '', '#tab-order'); }catch(e){}
           }
           return; 
       }

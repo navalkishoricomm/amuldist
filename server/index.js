@@ -2326,6 +2326,9 @@ app.get('/api/my/retailers/:id/balance-at-date', auth, requireDistributorOrStaff
     const fromDate = new Date(date);
     if (isNaN(fromDate.getTime())) return res.status(400).json({ error: 'Invalid date' });
 
+    // Adjust for IST start of day (subtract 5.5 hours) if just date provided
+    if (String(date).length === 10) fromDate.setMinutes(fromDate.getMinutes() - 330);
+
     // Find all transactions on or after this date
     const txs = await Transaction.find({ 
         retailerId: id, 
