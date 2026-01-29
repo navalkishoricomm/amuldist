@@ -575,6 +575,27 @@ window.switchTab = (id, pushHistory = true) => {
   if(id==='tab-sd') { renderSdDistributors(); }
 };
 
+// Global History Fallback (for blank screen prevention)
+window.onpopstate = (event) => {
+    // If loadDistributor or loadRetailer hasn't overridden this yet, or if they failed
+    if(event.state && event.state.tab && typeof window.switchTab === 'function'){
+        window.switchTab(event.state.tab, false);
+    } else {
+        // Fallback based on URL
+        if(location.pathname.includes('distributor.html') && typeof window.switchTab === 'function'){
+            window.switchTab('tab-dashboard', false);
+            history.replaceState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
+        } else if(location.pathname.includes('retailer.html') && typeof window.switchTab === 'function'){
+            // Note: switchTab might be the global one (Distributor) or overwritten one (Retailer)
+            // But global switchTab doesn't handle 'tab-order'. 
+            // However, loadRetailer overrides switchTab. If we are here, loadRetailer might not have run.
+            // If loadRetailer hasn't run, switchTab is the global one, which doesn't know 'tab-order'.
+            // So we can't do much if loadRetailer hasn't run.
+            // But if it HAS run, it overwrites onpopstate too.
+        }
+    }
+};
+
 async function loadDistributor(){
   // Tabs
   const tabs = ['dashboard','products','inventory','stock-in','stock-out','stock-wastage','rates','retailers','reports','staff','sd'];
@@ -2418,7 +2439,8 @@ async function loadRetailer(){
   await checkRoleAndRedirect('retailer');
   bindLogout();
   const tabs = ['order','history','profile'];
-  const switchTab = (id) => {
+  
+  const switchTab = (id, pushHistory = true) => {
     qsa('.tab-pane').forEach(el => {
       el.classList.remove('show','active');
       if(el.id === id) el.classList.add('show','active');
@@ -2426,11 +2448,43 @@ async function loadRetailer(){
     qsa('.nav-link').forEach(el => el.classList.remove('active'));
     const navBtn = qs(`button[data-bs-target="#${id}"]`);
     if(navBtn) navBtn.classList.add('active');
+    
+    if(pushHistory){
+        try { history.pushState({ tab: id }, '', `#${id}`); } catch(e){}
+    }
+
     if(id==='tab-order') { renderRetailerProducts(); }
     if(id==='tab-history') { loadRetailerTransactions(); }
     if(id==='tab-profile') { renderRetailerProfile(); }
   };
   window.switchTab = switchTab;
+
+  // History Handling
+  window.onpopstate = (event) => {
+      if(event.state && event.state.tab){
+          window.switchTab(event.state.tab, false);
+          // Trap at order tab (home)
+          if(event.state.tab === 'tab-order'){
+              history.pushState({ tab: 'tab-order' }, '', '#tab-order');
+          }
+      } else {
+          window.switchTab('tab-order', false);
+          history.pushState({ tab: 'tab-order' }, '', '#tab-order');
+      }
+  };
+
+  // Initialize history
+  const h = location.hash;
+  if(h && h.startsWith('#tab-')){
+     const id = h.substring(1);
+     history.replaceState({ tab: 'tab-order' }, '', '#tab-order');
+     window.switchTab(id, true);
+  } else {
+     history.replaceState({ tab: 'tab-order' }, '', '#tab-order');
+     history.pushState({ tab: 'tab-order' }, '', '#tab-order'); 
+     window.switchTab('tab-order', false);
+  }
+
   renderRetailerProducts();
   loadRetailerTransactions();
   
@@ -4357,12 +4411,21 @@ async function deleteStaff() {
       var oc = document.querySelector('.offcanvas.show');
       if (oc) { try { var oinst = bootstrap.Offcanvas.getInstance(oc) || bootstrap.Offcanvas.getOrCreateInstance(oc); oinst.hide(); } catch {} return; }
       var active = document.querySelector('.tab-pane.show.active');
-      if (active && active.id !== 'tab-dashboard' && typeof window.switchTab === 'function') { window.switchTab('tab-dashboard'); return; }
+      if (active && active.id !== 'tab-dashboard' && typeof window.switchTab === 'function') { 
+          window.switchTab('tab-dashboard'); 
+          // Ensure we push state to trap
+          try{ history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); }catch(e){}
+          return; 
+      }
       return;
     }
     if (p.includes('retailer.html')) {
       var rActive = document.querySelector('.tab-pane.show.active');
-      if (rActive && rActive.id !== 'tab-order' && typeof window.switchTab === 'function') { window.switchTab('tab-order'); return; }
+      if (rActive && rActive.id !== 'tab-order' && typeof window.switchTab === 'function') { 
+          window.switchTab('tab-order'); 
+          try{ history.pushState({ tab: 'tab-order' }, '', '#tab-order'); }catch(e){}
+          return; 
+      }
       return;
     }
     return;
