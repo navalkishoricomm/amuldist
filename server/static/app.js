@@ -4407,26 +4407,50 @@ async function deleteStaff() {
       return;
     }
     var p = location.pathname;
+    
+    // Helper to exit app
+    const exitApp = () => {
+        if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App){
+            window.Capacitor.Plugins.App.exitApp();
+        } else if(navigator.app && navigator.app.exitApp) {
+            navigator.app.exitApp();
+        }
+    };
+
     if (p.includes('distributor.html')) {
       var oc = document.querySelector('.offcanvas.show');
       if (oc) { try { var oinst = bootstrap.Offcanvas.getInstance(oc) || bootstrap.Offcanvas.getOrCreateInstance(oc); oinst.hide(); } catch {} return; }
+      
       var active = document.querySelector('.tab-pane.show.active');
-      if (active && active.id !== 'tab-dashboard' && typeof window.switchTab === 'function') { 
-          window.switchTab('tab-dashboard'); 
-          // Ensure we push state to trap
-          try{ history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); }catch(e){}
+      if (active && active.id !== 'tab-dashboard') { 
+          if(typeof window.switchTab === 'function') {
+              window.switchTab('tab-dashboard'); 
+              try{ history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard'); }catch(e){}
+          }
           return; 
       }
+      // On Dashboard - Exit
+      exitApp();
       return;
     }
+    
     if (p.includes('retailer.html')) {
       var rActive = document.querySelector('.tab-pane.show.active');
-      if (rActive && rActive.id !== 'tab-order' && typeof window.switchTab === 'function') { 
-          window.switchTab('tab-order'); 
-          try{ history.pushState({ tab: 'tab-order' }, '', '#tab-order'); }catch(e){}
+      if (rActive && rActive.id !== 'tab-order') { 
+          if(typeof window.switchTab === 'function') {
+              window.switchTab('tab-order'); 
+              try{ history.pushState({ tab: 'tab-order' }, '', '#tab-order'); }catch(e){}
+          }
           return; 
       }
+      // On Order Tab - Exit
+      exitApp();
       return;
+    }
+
+    // Default/Login Page
+    if (p.endsWith('/') || p.includes('index.html')) {
+        exitApp();
     }
     return;
   }
