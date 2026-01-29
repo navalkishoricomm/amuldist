@@ -418,7 +418,10 @@ app.get('/api/users', auth, requireAdmin, async (req, res) => {
     if (role) filter.role = role;
     if (active === 'true') filter.active = true;
     if (active === 'false') filter.active = false;
-    const users = await User.find(filter).sort({ createdAt: -1 });
+    const users = await User.find(filter)
+      .sort({ createdAt: -1 })
+      .populate('distributorId', 'name')
+      .populate('superDistributorId', 'name');
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: 'Failed to list users' });
@@ -427,11 +430,26 @@ app.get('/api/users', auth, requireAdmin, async (req, res) => {
 
 app.post('/api/users', auth, requireAdmin, async (req, res) => {
   try {
-    const { name, email, role, password } = req.body;
+    const { name, email, role, password, distributorId, superDistributorId } = req.body;
     if (!name || !email || !role || !password) return res.status(400).json({ error: 'name, email, role, password are required' });
-    if (!['distributor', 'retailer'].includes(role)) return res.status(400).json({ error: 'role must be distributor or retailer' });
-    const passwordHash = await bcrypt.hash(String(password), 10);
-    const user = await User.create({ name, email, role, active: true, passwordHash });
+    if (!['distributor', 'retailer', 'staff', 'super_distributor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    
+    const data = { name, email, role, active: true };
+    data.passwordHash = await bcrypt.hash(String(password), 10);
+    
+    if (distributorId) {
+      const d = await User.findOne({ _id: distributorId, role: 'distributor' });
+      if (!d) return res.status(400).json({ error: 'Invalid distributor ID' });
+      data.distributorId = distributorId;
+    }
+
+    if (superDistributorId) {
+      const sd = await User.findOne({ _id: superDistributorId, role: 'super_distributor' });
+      if (!sd) return res.status(400).json({ error: 'Invalid super distributor ID' });
+      data.superDistributorId = superDistributorId;
+    }
+
+    const user = await User.create(data);
     res.status(201).json({ _id: user._id, name: user.name, email: user.email, role: user.role, active: user.active });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'email already exists' });
@@ -650,7 +668,7 @@ app.post('/api/dev/bulk-retailers', requireDevSecret, async (req, res) => {
 app.patch('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, role, active, phone, address, password, distributorId } = req.body;
+    const { name, email, role, active, phone, address, password, distributorId, superDistributorId } = req.body;
     
     const user = await User.findById(id);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -676,8 +694,18 @@ app.patch('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
         }
     }
 
+    if (superDistributorId !== undefined) {
+      if (!superDistributorId) {
+          user.superDistributorId = undefined;
+      } else {
+           const sd = await User.findOne({ _id: superDistributorId, role: 'super_distributor' });
+           if (!sd) return res.status(400).json({ error: 'Invalid super distributor ID' });
+           user.superDistributorId = superDistributorId;
+      }
+    }
+
     await user.save();
-    res.json({ _id: user._id, name: user.name, email: user.email, role: user.role, active: user.active, phone: user.phone, address: user.address, distributorId: user.distributorId });
+    res.json({ _id: user._id, name: user.name, email: user.email, role: user.role, active: user.active, phone: user.phone, address: user.address, distributorId: user.distributorId, superDistributorId: user.superDistributorId });
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Email already exists' });
     res.status(500).json({ error: 'Failed to update user' });
@@ -2000,11 +2028,7 @@ app.post('/api/retailer/orders', auth, requireRetailer, async (req, res) => {
       
       orderItems.push({ productId: pid, quantity: qty, price });
       
-      if(isCompound && conv > 0){
-         total += (price / conv) * qty;
-      } else {
          total += price * qty;
-      }
     }
     
     if (orderItems.length === 0) return res.status(400).json({ error: 'no valid items' });
@@ -2136,7 +2160,7 @@ app.get('/api/debug/fix-ledger', auth, requireDistributorOrStaff(null), async (r
             const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
             let itemTotal = 0;
             if(isCompound && conv > 0){
-               itemTotal = (price / conv) * quantity;
+               itemTotal = price * quantity;
             } else {
                itemTotal = price * quantity;
             }
@@ -2421,7 +2445,13 @@ app.get('/api/my/stock-moves', auth, requireDistributorOrStaff(null), async (req
     const { productId, retailerId, type, from, to, staffId, distributorId } = req.query;
     const filter = {};
     if (ctx.isAdmin) {
-      if (distributorId && mongoose.Types.ObjectId.isValid(distributorId)) filter.distributorId = distributorId;
+      const { superDistributorId } = req.query;
+      if (distributorId && mongoose.Types.ObjectId.isValid(distributorId)) {
+        filter.distributorId = distributorId;
+      } else if (superDistributorId && mongoose.Types.ObjectId.isValid(superDistributorId)) {
+        const dists = await User.find({ role: 'distributor', superDistributorId }).select('_id');
+        filter.distributorId = { $in: dists.map(d => d._id) };
+      }
     } else {
       filter.distributorId = ctx.distributorId;
     }
@@ -2727,7 +2757,13 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
     const { retailerId, type, from, to, staffId, distributorId } = req.query;
     const filter = {};
     if (ctx.isAdmin) {
-      if (distributorId) filter.distributorId = distributorId;
+      const { superDistributorId } = req.query;
+      if (distributorId && mongoose.Types.ObjectId.isValid(distributorId)) {
+        filter.distributorId = distributorId;
+      } else if (superDistributorId && mongoose.Types.ObjectId.isValid(superDistributorId)) {
+        const dists = await User.find({ role: 'distributor', superDistributorId }).select('_id');
+        filter.distributorId = { $in: dists.map(d => d._id) };
+      }
     } else {
       filter.distributorId = ctx.distributorId;
     }
@@ -2784,8 +2820,14 @@ app.get('/api/my/transactions', auth, requireDistributorOrStaff(null), async (re
         if (pIds.size > 0) {
           const ids = Array.from(pIds);
           const [prods, dProds] = await Promise.all([
-            Product.find({ _id: { $in: ids } }).select('nameEnglish nameHindi unit').lean(),
-            DistProduct.find({ _id: { $in: ids } }).select('nameEnglish nameHindi unit').lean()
+            Product.find({ _id: { $in: ids } })
+              .select('nameEnglish nameHindi unit')
+              .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } })
+              .lean(),
+            DistProduct.find({ _id: { $in: ids } })
+              .select('nameEnglish nameHindi unit')
+              .populate({ path: 'unit', populate: { path: 'firstUnit secondUnit' } })
+              .lean()
           ]);
 
           const pMap = {};
@@ -2823,7 +2865,13 @@ app.get('/api/my/supplier-transactions', auth, requireDistributorOrStaff(null), 
     const { supplierId, type, from, to, staffId, distributorId } = req.query;
     const filter = {};
     if (ctx.isAdmin) {
-      if (distributorId) filter.distributorId = distributorId;
+      const { superDistributorId } = req.query;
+      if (distributorId && mongoose.Types.ObjectId.isValid(distributorId)) {
+        filter.distributorId = distributorId;
+      } else if (superDistributorId && mongoose.Types.ObjectId.isValid(superDistributorId)) {
+        const dists = await User.find({ role: 'distributor', superDistributorId }).select('_id');
+        filter.distributorId = { $in: dists.map(d => d._id) };
+      }
     } else {
       filter.distributorId = ctx.distributorId;
     }
@@ -3124,7 +3172,7 @@ app.post('/api/my/stock-out', auth, requireDistributorOrStaff(null), async (req,
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         let itemTotal = 0;
         if(isCompound && conv > 0){
-           itemTotal = (price / conv) * qty;
+           itemTotal = price * qty;
         } else {
            itemTotal = price * qty;
         }
@@ -3473,8 +3521,11 @@ app.post('/api/my/recompute-order', auth, requireDistributorOrStaff(null), async
           const gr = await GlobalRate.findOne({ productId: pid }); if(gr) price = gr.price;
         }
       }
+      // Fallback to Product Price if no rate found
+      if(price === 0 && pObj && pObj.price) price = pObj.price;
+
       items.push({ productId: pid, quantity: qty, price });
-      if(isCompound && conv > 0) grandTotal += (price / conv) * qty; else grandTotal += price * qty;
+      grandTotal += price * qty;
     }
 
     let order = await Order.findOne({ retailerId: rid, distributorId, createdAt: { $gte: start, $lte: end } }).sort({ createdAt: 1 });

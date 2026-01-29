@@ -24,6 +24,31 @@ ssh root@2602:ff16:13:104e::1 "pm2 restart amul-dist-server"
 
 ## Changelog
 
+### 2026-01-29 (Fixes)
+**Fixed SD Login Role & Stock Out Amount Calculation**
+- **Files Modified**:
+  - `server/static/index.html`: Removed conflicting inline login script to fix "Unknown role" error for Super Distributors.
+  - `server/static/admin.html`: Fixed "Add User" modal UI issues.
+  - `server/static/app.js`: 
+    - Corrected compound unit calculation logic (Price * Qty instead of Price / Conv).
+    - Added `showStockOutDetails` for detailed breakdown with correct rate display.
+    - Updated `showOrderDetails` to match fixed calculation logic.
+  - `server/index.js`: 
+    - Fixed compound unit calculation logic in backend stock-out and recompute routes.
+    - Added product price fallback for zero-price scenarios.
+- **Action**: Uploaded modified files (`server/index.js`, `server/static/app.js`, `server/static/admin.html`, `server/static/index.html`) and restarted `amul-dist-server`.
+- **Status**: Deployed & Verified.
+
+### 2026-01-29
+**Fixed Stock Out Calculation & Order Details Modal**
+- **Files Modified**:
+  - `server/index.js`: Updated `/api/my/transactions` to populate nested unit details (compound units) for products in orders.
+  - `server/static/app.js`: 
+    - Updated `showStockOutDetails` to correctly calculate and display compound unit quantities and prices.
+    - Updated `showOrderDetails` to use `item.price` instead of falling back to `product.price`.
+- **Action**: Uploaded modified files (`server/index.js`, `server/static/app.js`) and restarted `amul-dist-server`.
+- **Status**: Deployed & Verified.
+
 ### 2026-01-08
 **Fixed Stock Out "Not Found" Error & Breakdown Discrepancy**
 - **Files Modified**:

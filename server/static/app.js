@@ -15,7 +15,7 @@ function uiHref(page){ const isFile = location.protocol === 'file:'; return isFi
 async function api(path, opts={}){
   // Version check
   if(!window.APP_VERSION_LOGGED) {
-      console.log('App Version: v1.0.10 - Loaded');
+      console.log('App Version: v1.0.13 - Loaded');
       window.APP_VERSION_LOGGED = true;
   }
   const headers = Object.assign({ 'Content-Type':'application/json' }, opts.headers||{});
@@ -241,7 +241,7 @@ function checkAuth(){
   if(path.endsWith('index.html') || path=== '/'){
     if(TOKEN) {
       if(ROLE==='admin') location.href = uiHref('admin');
-      else if(ROLE==='distributor' || ROLE==='staff') location.href = uiHref('distributor');
+      else if(ROLE==='distributor' || ROLE==='staff' || ROLE==='super_distributor') location.href = uiHref('distributor');
       else if(ROLE==='retailer') location.href = uiHref('retailer');
       else { setToken('', ''); location.href = uiHref('index'); }
     }
@@ -256,11 +256,12 @@ async function login(){
   if(!email || !password){ alert('Please fill all fields'); return; }
   try{
     const res = await api('/api/auth/login', { method:'POST', body: JSON.stringify({ email, password }) });
+    console.log('Login role:', res.user.role);
     setToken(res.token, res.user.role);
     if(res.user.role==='admin') location.href = uiHref('admin');
     else if(res.user.role==='distributor' || res.user.role==='staff' || res.user.role==='super_distributor') location.href = uiHref('distributor');
     else if(res.user.role==='retailer') location.href = uiHref('retailer');
-    else alert('Unknown role');
+    else alert('Unknown role: ' + res.user.role);
   }catch(e){ alert(e.message); }
 }
 
@@ -479,37 +480,76 @@ async function renderUsersList(selector){
 }
 
 function openUserEditModal(u){
-  qs('#editUserId').value = u._id;
-  qs('#editUserName').value = u.name;
-  qs('#editUserEmail').value = u.email;
+  const isEdit = !!u;
+  qs('#editUserId').value = isEdit ? u._id : '';
+  qs('#editUserName').value = isEdit ? u.name : '';
+  qs('#editUserEmail').value = isEdit ? u.email : '';
   const roleSel = qs('#editUserRole');
-  roleSel.value = u.role;
-  qs('#editUserPhone').value = u.phone || '';
-  qs('#editUserAddress').value = u.address || '';
-  qs('#editUserActive').checked = u.active;
+  roleSel.value = isEdit ? u.role : 'distributor';
+  qs('#editUserPhone').value = (isEdit && u.phone) ? u.phone : '';
+  qs('#editUserAddress').value = (isEdit && u.address) ? u.address : '';
+  qs('#editUserActive').checked = isEdit ? u.active : true;
   qs('#editUserPassword').value = '';
   
   // Load distributors and handle role change
   const distDiv = qs('#editUserDistributorDiv');
   const distSel = qs('#editUserDistributor');
   
+  const sdDiv = qs('#editUserSuperDistributorDiv');
+  const sdSel = qs('#editUserSuperDistributor');
+
   const toggleDist = () => {
-    if(roleSel.value === 'retailer') show(distDiv);
+    const role = roleSel.value;
+    // Show distributor select for retailer AND staff
+    if(role === 'retailer' || role === 'staff') show(distDiv);
     else hide(distDiv);
+    
+    // Show SD select for distributor
+    if(role === 'distributor') show(sdDiv);
+    else hide(sdDiv);
   };
   roleSel.onchange = toggleDist;
   
-  // Fetch distributors
-  api('/api/users?role=distributor').then(dists => {
-    distSel.innerHTML = '<option value="">-- Select Distributor --</option>';
-    dists.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d._id;
-      opt.textContent = d.name + (d.active ? '' : ' (Inactive)');
-      if(u.distributorId === d._id || (u.distributorId && u.distributorId._id === d._id)) opt.selected = true;
-      distSel.appendChild(opt);
-    });
-    toggleDist();
+  // Fetch distributors and SDs
+  Promise.all([
+      api('/api/users?role=distributor'),
+      api('/api/users?role=super_distributor')
+  ]).then(([dists, sds]) => {
+      if(distSel){
+        distSel.innerHTML = '<option value="">-- Select Distributor --</option>';
+        dists.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d._id;
+          opt.textContent = d.name + (d.active ? '' : ' (Inactive)');
+          
+          let uDistId = '';
+          if(isEdit && u.distributorId){
+             uDistId = (typeof u.distributorId === 'object') ? u.distributorId._id : u.distributorId;
+          }
+          if(String(uDistId) === String(d._id)) opt.selected = true;
+          
+          distSel.appendChild(opt);
+        });
+      }
+      
+      if(sdSel){
+        sdSel.innerHTML = '<option value="">-- Select Super Distributor --</option>';
+        sds.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s._id;
+          opt.textContent = s.name + (s.active ? '' : ' (Inactive)');
+          
+          let uSDId = '';
+          if(isEdit && u.superDistributorId){
+             uSDId = (typeof u.superDistributorId === 'object') ? u.superDistributorId._id : u.superDistributorId;
+          }
+          if(String(uSDId) === String(s._id)) opt.selected = true;
+          
+          sdSel.appendChild(opt);
+        });
+      }
+      
+      toggleDist();
   }).catch(console.error);
 
   const m = bootstrap.Modal.getOrCreateInstance(qs('#userEditModal'));
@@ -529,12 +569,18 @@ function bindUserEditModal(){
        const active = qs('#editUserActive').checked;
        const password = qs('#editUserPassword').value;
        const distributorId = qs('#editUserDistributor').value;
+       const superDistributorId = qs('#editUserSuperDistributor').value;
        
-       const body = { name, email, role, phone, address, active, distributorId };
+       const body = { name, email, role, phone, address, active, distributorId, superDistributorId };
        if(password) body.password = password;
        
        try {
-         await api(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+         if(id) {
+            await api(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+         } else {
+            if(!password) throw new Error('Password is required for new user');
+            await api('/api/users', { method: 'POST', body: JSON.stringify(body) });
+         }
          const el = qs('#userEditModal');
          const m = bootstrap.Modal.getInstance(el);
          if(m) m.hide();
@@ -584,10 +630,12 @@ window.onpopstate = (event) => {
         // Fallback based on URL
         if(location.pathname.includes('distributor.html') && typeof window.switchTab === 'function'){
             window.switchTab('tab-dashboard', false);
-            history.replaceState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
+            // TRAP: Push state back to prevent exiting to blank screen
+            history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
         } else if(location.pathname.includes('retailer.html') && typeof window.switchTab === 'function'){
             window.switchTab('tab-order', false);
-            history.replaceState({ tab: 'tab-order' }, '', '#tab-order');
+            // TRAP: Push state back to prevent exiting to blank screen
+            history.pushState({ tab: 'tab-order' }, '', '#tab-order');
         }
     }
 };
@@ -609,8 +657,9 @@ async function loadDistributor(){
       if(event.state && event.state.tab){
           window.switchTab(event.state.tab, false);
       } else {
-          // If popped to initial/unknown state, force dashboard
+          // If popped to initial/unknown state, force dashboard AND trap
           window.switchTab('tab-dashboard', false);
+          history.pushState({ tab: 'tab-dashboard' }, '', '#tab-dashboard');
       }
   };
   
@@ -1966,11 +2015,7 @@ async function renderStockOut(initialState = null){
         }
         
         let amt = 0;
-        if (isCompound && conv > 0) {
-           amt = (price / conv) * qty;
-        } else {
            amt = price * qty;
-        }
         
         const amtEl = qs(`#amt-${p._id}`);
         const brkEl = qs(`#brk-${p._id}`);
@@ -2009,7 +2054,7 @@ async function renderStockOut(initialState = null){
         const conv = isCompound ? Number(u.conversionFactor)||0 : 0;
         const price = getPrice(p._id);
         
-        const priceUnitSymbol = isCompound ? (first?first.symbol:'Base') : (u?u.symbol:'unit');
+        const priceUnitSymbol = isCompound ? (second?second.symbol:'Unit') : (u?u.symbol:'unit');
 
         const tr = document.createElement('tr');
         tr.id = `row-out-${p._id}`;
@@ -2454,6 +2499,7 @@ async function loadRetailer(){
           window.switchTab(event.state.tab, false);
       } else {
           window.switchTab('tab-order', false);
+          history.pushState({ tab: 'tab-order' }, '', '#tab-order');
       }
   };
 
@@ -2501,7 +2547,7 @@ async function renderRetailerProducts(){
         : `<input type="number" class="form-control form-control-sm r-simple" data-id="${p._id}" min="0" placeholder="Qty">`;
         
       // Price Display Unit
-      const priceUnitSymbol = isCompound ? (first?first.symbol:'Base') : (u?u.symbol:'unit');
+      const priceUnitSymbol = isCompound ? (second?second.symbol:'Unit') : (u?u.symbol:'unit');
         
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -2535,7 +2581,7 @@ async function renderRetailerProducts(){
         }
         
         if (isCompound && conv > 0) {
-           total += qty * (p.price / conv);
+           total += qty * p.price;
         } else {
            total += qty * p.price;
         }
@@ -2924,13 +2970,80 @@ async function bindReportActions(){
     if(prodSel){ prodSel.innerHTML = '<option value="">All Products</option>' + products.map(p=>`<option value="${p._id}">${p.nameEnglish}</option>`).join(''); }
 
     if(ROLE === 'admin'){
+      const sds = await api('/api/users?role=super_distributor');
       const distributors = await api('/api/users?role=distributor');
       const retailers = await api('/api/users?role=retailer');
+      const allStaff = await api('/api/users?role=staff');
+      const allSuppliers = await api('/api/admin/suppliers');
+      
+      const sdSel = qs('#repSDSel');
       const distSel = qs('#repDistributorSel');
+      const retSel = qs('#repRetailerSel');
+      
+      if(sdSel) {
+        sdSel.innerHTML = '<option value="">All Super Distributors</option>' + sds.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+        sdSel.onchange = () => {
+            const sdId = sdSel.value;
+            let filtered = distributors;
+            if(sdId) {
+                filtered = distributors.filter(d => {
+                    if(!d.superDistributorId) return false;
+                    const sId = typeof d.superDistributorId === 'object' ? d.superDistributorId._id : d.superDistributorId;
+                    return String(sId) === String(sdId);
+                });
+            }
+            if(distSel) {
+                 distSel.innerHTML = '<option value="">All Distributors</option>' + filtered.map(d=>`<option value="${d._id}">${d.name}</option>`).join('');
+                 distSel.value = '';
+                 // Trigger distributor change to update retailers
+                 if(distSel.onchange) distSel.onchange();
+            }
+        };
+      }
+      
       if(distSel){ 
          distSel.innerHTML = '<option value="">All Distributors</option>' + distributors.map(d=>`<option value="${d._id}">${d.name}</option>`).join(''); 
+         distSel.onchange = () => {
+             const dId = distSel.value;
+             
+             // Filter Retailers
+             let filteredRet = retailers;
+             if(dId){
+                 filteredRet = retailers.filter(r => {
+                     if(!r.distributorId) return false;
+                     const distId = typeof r.distributorId === 'object' ? r.distributorId._id : r.distributorId;
+                     return String(distId) === String(dId);
+                 });
+             }
+             if(retSel) retSel.innerHTML = '<option value="">All Retailers</option>' + filteredRet.map(r=>`<option value="${r._id}">${r.name}</option>`).join('');
+
+             // Filter Staff
+             let filteredStaff = allStaff;
+             if(dId){
+                 filteredStaff = allStaff.filter(s => {
+                     if(!s.distributorId) return false;
+                     const distId = typeof s.distributorId === 'object' ? s.distributorId._id : s.distributorId;
+                     return String(distId) === String(dId);
+                 });
+             }
+             if(staffSel) staffSel.innerHTML = '<option value="">All Staff</option>' + filteredStaff.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+
+             // Filter Suppliers
+             let filteredSup = allSuppliers;
+             if(dId){
+                 filteredSup = allSuppliers.filter(s => String(s.distributorId) === String(dId));
+             }
+             if(supSel) supSel.innerHTML = '<option value="">All Suppliers</option>' + filteredSup.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+         };
+         // Trigger initial population
+         distSel.onchange();
       }
-      if(retSel){ retSel.innerHTML = '<option value="">All Retailers</option>' + retailers.map(r=>`<option value="${r._id}">${r.name}</option>`).join(''); }
+      
+      // Initial population if distSel didn't trigger
+      if(retSel && retSel.innerHTML === '') retSel.innerHTML = '<option value="">All Retailers</option>' + retailers.map(r=>`<option value="${r._id}">${r.name}</option>`).join('');
+      if(staffSel && staffSel.innerHTML === '') staffSel.innerHTML = '<option value="">All Staff</option>' + allStaff.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+      if(supSel && supSel.innerHTML === '') supSel.innerHTML = '<option value="">All Suppliers</option>' + allSuppliers.map(s=>`<option value="${s._id}">${s.name}</option>`).join('');
+
     } else {
       const staff = await api('/api/my/staff');
       const retailers = await api('/api/my/retailers');
@@ -3028,11 +3141,15 @@ async function renderReport(){
     const supplierId = qs('#repSupplierSel') ? qs('#repSupplierSel').value : '';
     const from = qs('#repFromDate') ? qs('#repFromDate').value : '';
     const to = qs('#repToDate') ? qs('#repToDate').value : '';
+    const distributorId = qs('#repDistributorSel') ? qs('#repDistributorSel').value : '';
+    const superDistributorId = qs('#repSDSel') ? qs('#repSDSel').value : '';
 
     let url = '';
     const params = [];
     params.push(`_t=${Date.now()}`);
     if(staffId) params.push(`staffId=${encodeURIComponent(staffId)}`);
+    if(distributorId) params.push(`distributorId=${encodeURIComponent(distributorId)}`);
+    if(superDistributorId) params.push(`superDistributorId=${encodeURIComponent(superDistributorId)}`);
     if(from) params.push(`from=${encodeURIComponent(from)}`);
     if(to) params.push(`to=${encodeURIComponent(to)}`);
     if(cat === 'stock'){
@@ -3985,6 +4102,107 @@ function renderUnitDetailModal(u, unitMap){
   } catch(e){ console.error(e); }
 }
 
+window.showStockOutDetails = async function(retailerId, retailerNameEncoded, from, to) {
+    const retailerName = decodeURIComponent(retailerNameEncoded);
+    let modal = document.getElementById('stockOutDetailModal');
+    if(!modal){
+        const d = document.createElement('div');
+        d.innerHTML = `
+        <div class="modal fade" id="stockOutDetailModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Stock Out Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-2 fw-bold" id="sodRetailer"></div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead><tr><th>Date</th><th>Product</th><th class="text-end">Qty</th><th class="text-end">Rate</th><th class="text-end">Amount</th></tr></thead>
+                                <tbody id="sodRows"></tbody>
+                                <tfoot id="sodFoot"></tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+        document.body.appendChild(d.firstElementChild);
+        modal = document.getElementById('stockOutDetailModal');
+    }
+    
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+    
+    document.getElementById('sodRetailer').textContent = `Retailer: ${retailerName}`;
+    const tbody = document.getElementById('sodRows');
+    const tfoot = document.getElementById('sodFoot');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Loading...</td></tr>';
+    tfoot.innerHTML = '';
+    
+    try {
+        const params = [`type=OUT`, `retailerId=${retailerId}`];
+        if(from) params.push(`from=${from}`);
+        if(to) params.push(`to=${to}`);
+        
+        const [moves, products, units] = await Promise.all([
+            api(`/api/my/stock-moves?${params.join('&')}`),
+            api('/api/my/products?_t='+Date.now()),
+            api('/api/units')
+        ]);
+        
+        const pMap = {}; products.forEach(p => pMap[p._id] = p);
+        const uMap = {}; units.forEach(u => uMap[u._id] = u);
+        
+        tbody.innerHTML = '';
+        let totalAmt = 0;
+        
+        moves.forEach(m => {
+             const p = pMap[m.productId] || { nameEnglish: 'Unknown', unit: null };
+             const date = new Date(m.createdAt).toLocaleString();
+             const qty = m.quantity;
+             const price = m.price || 0;
+             const amount = qty * price;
+             totalAmt += amount;
+             
+             let qtyStr = qty;
+             let rateStr = `₹${price.toFixed(2)}`;
+             
+             if(p.unit){
+                 const u = typeof p.unit === 'object' ? p.unit : uMap[p.unit];
+                 if(u){
+                     qtyStr = formatUnitQty(qty, u, uMap);
+                     const isCompound = u.type === 'Compound';
+                     const symbol = isCompound ? (u.secondUnit ? (u.secondUnit.symbol || uMap[u.secondUnit]?.symbol) : 'Unit') : u.symbol;
+                     rateStr = `₹${price.toFixed(2)} / ${symbol}`;
+                 }
+             }
+             
+             const tr = document.createElement('tr');
+             tr.innerHTML = `
+                <td>${date}</td>
+                <td>${p.nameEnglish || p.nameHindi}</td>
+                <td class="text-end">${qtyStr}</td>
+                <td class="text-end">${rateStr}</td>
+                <td class="text-end">₹${amount.toFixed(2)}</td>
+             `;
+             tbody.appendChild(tr);
+        });
+        
+        tfoot.innerHTML = `
+            <tr class="fw-bold">
+                <td colspan="4" class="text-end">Total</td>
+                <td class="text-end">₹${totalAmt.toFixed(2)}</td>
+            </tr>
+        `;
+        
+    } catch(e) {
+        console.error(e);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Failed to load details</td></tr>';
+    }
+};
+
 window.showOrderDetails = async function(orderId) {
     let modal = qs('#orderDetailModal');
     if (!modal) {
@@ -4039,10 +4257,10 @@ window.showOrderDetails = async function(orderId) {
              const rawQty = Number(item.quantity || 0);
              let rawPrice = Number(item.price || 0);
              
-             // Fallback for existing orders with missing price data
-             if (rawPrice === 0 && p.price) {
-                 rawPrice = Number(p.price);
-             }
+             // Fallback removed to respect order time price
+             // if (rawPrice === 0 && p.price) {
+             //     rawPrice = Number(p.price);
+             // }
              
              let qtyStr = rawQty;
              if(p && p.unit && String(p.unit.type).trim().toLowerCase() === 'compound' && p.unit.conversionFactor){
@@ -4062,11 +4280,7 @@ window.showOrderDetails = async function(orderId) {
             let unitPrice = rawPrice;
             let lineTotal = rawQty * rawPrice;
             if(p && p.unit && String(p.unit.type).trim().toLowerCase() === 'compound' && p.unit.conversionFactor){
-               const conv = Number(p.unit.conversionFactor);
-               if(conv > 0){
-                  unitPrice = rawPrice / conv;
-                  lineTotal = unitPrice * rawQty;
-               }
+               // Removed division logic to match direct price * qty calculation
             }
             html += `
                <tr>
@@ -4741,10 +4955,37 @@ window.showStockOutDetails = async function(retailerId, encodedName, from, to) {
                     const pName = (typeof pObj === 'object' && (pObj.nameEnglish || pObj.nameHindi)) 
                                   ? (pObj.nameEnglish || pObj.nameHindi) 
                                   : 'Unknown Product';
-                    const qty = item.quantity;
-                    const price = item.price;
-                    const sub = qty * price;
-                    detailsHtml += `<tr><td>${pName}</td><td class="text-end">${qty}</td><td class="text-end">₹${price.toFixed(2)}</td><td class="text-end">₹${sub.toFixed(2)}</td></tr>`;
+                    
+                    const rawQty = Number(item.quantity || 0);
+                    const rawPrice = Number(item.price || 0);
+                    
+                    let qtyStr = rawQty;
+                    let unitPrice = rawPrice;
+                    let sub = rawQty * rawPrice;
+                    let rateDisplay = `₹${unitPrice.toFixed(2)}`;
+
+                    // Compound Unit Logic
+                    if(pObj && pObj.unit && String(pObj.unit.type).trim().toLowerCase() === 'compound' && pObj.unit.conversionFactor){
+                         const conv = Number(pObj.unit.conversionFactor);
+                         if(conv > 0){
+                             const first = Math.trunc(rawQty / conv);
+                             const second = rawQty % conv;
+                             const s1 = (pObj.unit.firstUnit && pObj.unit.firstUnit.symbol) ? pObj.unit.firstUnit.symbol : 'Box';
+                             const s2 = (pObj.unit.secondUnit && pObj.unit.secondUnit.symbol) ? pObj.unit.secondUnit.symbol : 'Pouch';
+                             
+                             if(first > 0 && second > 0) qtyStr = `${first} ${s1} + ${second} ${s2}`;
+                             else if(first > 0) qtyStr = `${first} ${s1}`;
+                             else qtyStr = `${second} ${s2}`;
+                             
+                             unitPrice = rawPrice / conv;
+                             sub = unitPrice * rawQty;
+                             
+                             // Display Base Rate (per Box) to avoid confusion
+                             rateDisplay = `₹${rawPrice.toFixed(2)} / ${s1}`;
+                         }
+                    }
+
+                    detailsHtml += `<tr><td>${pName}</td><td class="text-end">${qtyStr}</td><td class="text-end">${rateDisplay}</td><td class="text-end">₹${sub.toFixed(2)}</td></tr>`;
                 });
                 detailsHtml += '</tbody></table></div>';
             } else {

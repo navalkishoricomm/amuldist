@@ -47,26 +47,6 @@
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="/ui/app.js?v=1.0.11"></script>
-  <script>
-    async function login(){
-      const email=document.getElementById('email').value;
-      const password=document.getElementById('password').value;
-      if(!email || !password){ alert('Please fill all fields'); return; }
-      try{
-        const res = await api('/api/auth/login', { method:'POST', body: JSON.stringify({ email, password }) });
-        setToken(res.token, res.user.role);
-        if(res.user.role==='admin') location.href='/ui/admin.html';
-        else if(res.user.role==='distributor' || res.user.role==='staff') location.href='/ui/distributor.html';
-        else if(res.user.role==='retailer') location.href='/ui/retailer.html';
-        else alert('Unknown role');
-      }catch(e){ 
-        alert(e.message); 
-        if(e.message.includes('Connection failed') || e.message.includes('Failed to fetch')){
-          document.getElementById('serverSettings').classList.remove('d-none');
-        }
-      }
-    }
-  </script>
+  <script src="/ui/app.js?v=1.0.14"></script>
 </body>
 </html>
